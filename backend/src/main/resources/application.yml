@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: uzhhorod-digital-api
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/uzhhorod_digital}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+transport:
+  gtfs-feed-url: ${TRANSPORT_GTFS_FEED_URL:https://track.ua-gis.com/gtfs/uzhhorod/static.zip}
+  gtfs-import-cron: ${TRANSPORT_GTFS_IMPORT_CRON:0 0 3 * * *}
+  gtfs-import-zone: ${TRANSPORT_GTFS_IMPORT_ZONE:Europe/Kyiv}
+  import-token: ${TRANSPORT_IMPORT_TOKEN:}

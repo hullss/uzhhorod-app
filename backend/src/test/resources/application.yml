@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:uzhhorod_digital;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+transport:
+  gtfs-feed-url: https://example.invalid/feed.zip
