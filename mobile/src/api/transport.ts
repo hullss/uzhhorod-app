@@ -59,13 +59,28 @@ export type TransportImportStatus = {
 };
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
+const requestTimeoutMs = 8_000;
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`);
-  if (!response.ok) {
-    throw new Error(`Не вдалося завантажити дані: HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(`${apiUrl}${path}`, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Не вдалося завантажити дані: HTTP ${response.status}`);
+    }
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Сервер транспорту не відповів за 8 секунд. Перевірте, чи запущений бекенд.");
+    }
+    if (error instanceof TypeError) {
+      throw new Error("Не вдається з’єднатися з сервером транспорту. Перевірте бекенд і EXPO_PUBLIC_API_URL.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return response.json() as Promise<T>;
 }
 
 export function getRoutes(query?: string): Promise<TransportRoute[]> {

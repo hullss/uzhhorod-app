@@ -15,3 +15,12 @@ transport:
   gtfs-import-cron: ${TRANSPORT_GTFS_IMPORT_CRON:0 0 3 * * *}
   gtfs-import-zone: ${TRANSPORT_GTFS_IMPORT_ZONE:Europe/Kyiv}
   import-token: ${TRANSPORT_IMPORT_TOKEN:}
+
+city-services:
+  accessibility:
+    datastore-url: ${ACCESSIBILITY_DATASTORE_URL:https://data.rada-uzhgorod.gov.ua/api/3/action/datastore_search?resource_id=a5301f8c-b5bc-499d-8289-e87aaeca8d4c&limit=100}
+    cache-duration: ${ACCESSIBILITY_CACHE_DURATION:PT6H}
+  open-data:
+    catalog-api-url: ${OPEN_DATA_CATALOG_API_URL:https://data.rada-uzhgorod.gov.ua/api/3/action/package_search?sort=metadata_modified%20desc&rows=12}
+    catalog-url: ${OPEN_DATA_CATALOG_URL:https://data.rada-uzhgorod.gov.ua}
+    cache-duration: ${OPEN_DATA_CATALOG_CACHE_DURATION:PT15M}
