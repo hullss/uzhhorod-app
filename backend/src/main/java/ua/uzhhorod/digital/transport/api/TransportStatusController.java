@@ -23,6 +23,7 @@ import ua.uzhhorod.digital.transport.application.TransportStopService;
 import ua.uzhhorod.digital.transport.application.TransportScheduleService;
 import ua.uzhhorod.digital.transport.application.TransportRouteMapService;
 import ua.uzhhorod.digital.transport.application.TransportImportRunService;
+import ua.uzhhorod.digital.transport.application.TransportVehiclePositionService;
 
 @RestController
 @RequestMapping(path = "/api/transport", produces = MediaType.APPLICATION_JSON_VALUE + ";charset=UTF-8")
@@ -34,6 +35,7 @@ public class TransportStatusController {
     private final TransportRouteMapService routeMapService;
     private final TransportImportRunService importRunService;
     private final GtfsRouteImportService gtfsRouteImportService;
+    private final TransportVehiclePositionService vehiclePositionService;
     private final String importToken;
 
     public TransportStatusController(
@@ -43,6 +45,7 @@ public class TransportStatusController {
             TransportRouteMapService routeMapService,
             TransportImportRunService importRunService,
             GtfsRouteImportService gtfsRouteImportService,
+            TransportVehiclePositionService vehiclePositionService,
             @Value("${transport.import-token:}") String importToken) {
         this.routeService = routeService;
         this.stopService = stopService;
@@ -50,6 +53,7 @@ public class TransportStatusController {
         this.routeMapService = routeMapService;
         this.importRunService = importRunService;
         this.gtfsRouteImportService = gtfsRouteImportService;
+        this.vehiclePositionService = vehiclePositionService;
         this.importToken = importToken;
     }
 
@@ -108,6 +112,12 @@ public class TransportStatusController {
     @GetMapping("/stops/{stopId}/routes")
     public List<TransportRouteResponse> getStopRoutes(@PathVariable UUID stopId) {
         return stopService.getRoutes(stopId);
+    }
+
+    @GetMapping("/vehicles")
+    public TransportVehiclePositionsResponse getVehiclePositions(
+            @RequestParam(required = false) String routeNumber) {
+        return vehiclePositionService.getPositions(routeNumber);
     }
 
     @PostMapping("/imports/gtfs")

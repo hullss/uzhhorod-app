@@ -7,13 +7,18 @@ import {
   PublicSans_700Bold,
   useFonts,
 } from "@expo-google-fonts/public-sans";
-import { useEffect, useState } from "react";
-import MapView, { Marker, Polyline, type Region } from "react-native-maps";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RouteMap, type MapRegion } from "./src/components/RouteMap";
+import { MiniaturesMap } from "./src/components/MiniaturesMap";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  BackHandler,
   FlatList,
+  Image,
   Linking,
+  PanResponder,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -27,6 +32,7 @@ import {
   getRoutes,
   getDepartures,
   getRouteMap,
+  getVehiclePositions,
   getLatestTransportImport,
   getStopRoutes,
   getStops,
@@ -36,13 +42,23 @@ import {
   type TransportRoute,
   type TransportRouteDetails,
   type TransportStop,
+  type TransportVehiclePositions,
 } from "./src/api/transport";
 import {
   getAccessibleBuildings,
-  getLatestOpenDataDatasets,
+  getAirAlertStatus,
+  getCurrencyRates,
+  getMiniSculptures,
+  getOfficialNews,
+  getWeather,
   type AccessibleBuilding,
   type AccessibleBuildingList,
-  type OpenDataDatasetList,
+  type AirAlertStatus,
+  type CurrencyRates,
+  type OfficialNewsList,
+  type MiniSculpture,
+  type MiniSculptureList,
+  type Weather,
 } from "./src/api/cityServices";
 
 type ScheduleView = {
@@ -55,6 +71,7 @@ type ScheduleView = {
 type MapScreen = {
   route: TransportRouteDetails;
   map: TransportRouteMap;
+  activeVariantId?: string;
 };
 
 type StopScreen = {
@@ -63,7 +80,8 @@ type StopScreen = {
 };
 
 type CityService = {
-  id: "announcements" | "accessibility" | "parking" | "silence";
+  id: "cnap" | "polls" | "accessibility" | "parking" | "shelters" | "resilience" | "waste" | "playgrounds" | "miniatures";
+  category: "mobility" | "civic" | "safety" | "places";
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   description: string;
@@ -72,20 +90,38 @@ type CityService = {
   notice?: string;
 };
 
-type RootTab = "services" | "transport" | "notifications" | "profile";
+const SERVICE_CATEGORIES: Array<{ id: CityService["category"]; title: string }> = [
+  { id: "mobility", title: "Пересування" },
+  { id: "civic", title: "Справи з містом" },
+  { id: "safety", title: "Безпека та доступність" },
+  { id: "places", title: "Місця й прогулянки" },
+];
+
+type RootTab = "home" | "feed" | "services" | "profile";
 
 const CITY_SERVICES: CityService[] = [
   {
-    id: "announcements",
-    icon: "megaphone-outline",
-    title: "Події й оголошення",
-    description: "Новини, анонси та офіційні повідомлення міської ради.",
-    sourceLabel: "Відкрити офіційний сайт міської ради",
-    sourceUrl: "https://rada-uzhgorod.gov.ua/",
-    notice: "Стрічку не копіюємо в застосунок, щоб не показувати застарілі або неперевірені повідомлення.",
+    id: "cnap",
+    category: "civic",
+    icon: "document-text-outline",
+    title: "Запис до ЦНАП",
+    description: "Особистий кабінет, електронні послуги та запис на прийом.",
+    sourceLabel: "Відкрити кабінет ЦНАП",
+    sourceUrl: "https://my.cnap.rada-uzhgorod.gov.ua/",
+    notice: "Авторизація та подання заяв відбуваються тільки в офіційному кабінеті ЦНАП. Застосунок не зберігає персональні дані чи BankID.",
+  },
+  {
+    id: "polls",
+    category: "civic",
+    icon: "checkbox-outline",
+    title: "Опитування",
+    description: "Міські опитування та можливість поділитися думкою.",
+    sourceLabel: "Незабаром",
+    notice: "Це буде власний модуль застосунку з відкритими правилами та перевіркою активних опитувань. Не створюємо фіктивних голосувань до запуску серверної частини.",
   },
   {
     id: "accessibility",
+    category: "safety",
     icon: "accessibility-outline",
     title: "Доступне місто",
     description: "Реєстр будівель, щодо яких місто проводило моніторинг доступності.",
@@ -95,6 +131,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "parking",
+    category: "mobility",
     icon: "car-outline",
     title: "Паркування",
     description: "Правила паркування, інформація від інспекторів і пошук постанови.",
@@ -103,12 +140,52 @@ const CITY_SERVICES: CityService[] = [
     notice: "Оплату, штрафи та дані банківських карток застосунок не обробляє — це лише перехід до офіційного сервісу.",
   },
   {
-    id: "silence",
-    icon: "time-outline",
-    title: "Хвилина мовчання",
-    description: "Щодня о 09:00 вшановуємо полеглих захисників і захисниць України.",
-    sourceLabel: "Пам’ятати разом",
-    notice: "Це тихе нагадування на екрані. Воно не надсилає push-сповіщень і не є екстреним повідомленням.",
+    id: "shelters",
+    category: "safety",
+    icon: "shield-outline",
+    title: "Укриття",
+    description: "Мапа захисних споруд та важлива інформація про них.",
+    sourceLabel: "Відкрити офіційний набір",
+    sourceUrl: "https://data.rada-uzhgorod.gov.ua/dataset/14d3e436-281b-49c2-b178-c9a9c6b28a2e",
+    notice: "Офіційний файл з укриттями зараз перебуває на модерації. Додамо точки на мапу лише коли місто відкриє актуальні координати.",
+  },
+  {
+    id: "resilience",
+    category: "safety",
+    icon: "flashlight-outline",
+    title: "Пункти незламності",
+    description: "Мапа пунктів допомоги під час тривалих відключень.",
+    sourceLabel: "Незабаром",
+    notice: "Перш ніж показувати мапу, отримаємо підтверджений перелік, графік роботи та контакти кожного пункту. Застарілі адреси в такому сервісі неприпустимі.",
+  },
+  {
+    id: "waste",
+    category: "places",
+    icon: "trash-outline",
+    title: "Сортування та відходи",
+    description: "Контейнерні майданчики, небезпечні відходи й точки прийому сировини.",
+    sourceLabel: "Відкрити офіційний набір",
+    sourceUrl: "https://data.rada-uzhgorod.gov.ua/dataset/d6aaf49f-765b-49e8-b891-d03d3d44f1ae",
+    notice: "У міста є набір із контейнерними майданчиками та точками прийому відходів. Додамо його на мапу після перевірки доступності й формату координат у ресурсі.",
+  },
+  {
+    id: "playgrounds",
+    category: "places",
+    icon: "football-outline",
+    title: "Майданчики",
+    description: "Дитячі, спортивні та інші місця для активного відпочинку.",
+    sourceLabel: "Відкрити офіційний набір",
+    sourceUrl: "https://data.rada-uzhgorod.gov.ua/dataset/106577c3-0816-4a67-9483-ef2f227576d0",
+    notice: "Набір міста містить адреси, координати й опис обладнання. Його CSV зараз на модерації, тому карту додамо після відкриття доступу до актуальних точок.",
+  },
+  {
+    id: "miniatures",
+    category: "places",
+    icon: "walk-outline",
+    title: "Мініскульптури Ужгорода",
+    description: "Прогулянковий маршрут і мапа маленьких символів міста.",
+    sourceLabel: "Відкрити мапу",
+    notice: "Власний каталог уже має першу добірку локацій і буде доповнюватися. Ми не використовуємо чужі фотографії чи скопійовані описи.",
   },
 ];
 
@@ -137,26 +214,45 @@ const FONTS = {
   bold: "PublicSans_700Bold",
 };
 
-function CivicHeader() {
+function CivicHeader(_props: {
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+} = {}) {
   return (
     <View style={styles.civicHeader}>
       <View style={styles.brandGroup}>
-        <View style={styles.brandMark}>
-          <Ionicons name="business-outline" size={19} color={COLORS.navy} />
-        </View>
+        <BrandMark />
         <View>
           <View style={styles.brandTitleRow}>
-            <Text style={styles.brandTitle}>Ужгород</Text>
-            <Text style={styles.brandCountry}>UA</Text>
+            <Text style={styles.brandTitle}>Ужгород Поруч</Text>
           </View>
-          <Text style={styles.brandSubtitle}>Офіційні сервіси</Text>
+          <Text style={styles.brandSubtitle}>офіційні міські сервіси</Text>
         </View>
       </View>
-      <View style={styles.headerProfileIcon}>
-        <Ionicons name="person-outline" size={18} color="#ffffff" />
-      </View>
+      <Text style={styles.headerDate}>{formatDashboardDate()}</Text>
     </View>
   );
+}
+
+function BrandMark({ size = 34 }: { size?: number }) {
+  return <View style={[styles.brandMark, { borderRadius: Math.round(size * 0.29), height: size, width: size }]}>
+    <Text style={[styles.brandMarkText, { fontSize: Math.round(size * 0.5) }]}>У</Text>
+    <View style={[styles.brandMarkAccent, { borderRadius: Math.round(size * 0.1), height: Math.max(5, Math.round(size * 0.18)), width: Math.max(5, Math.round(size * 0.18)) }]} />
+  </View>;
+}
+
+function BrandIntro({ opacity, scale }: { opacity: Animated.Value; scale: Animated.Value }) {
+  return <SafeAreaView style={styles.brandIntroScreen}>
+    <Animated.View style={[styles.brandIntroContent, { opacity, transform: [{ scale }] }]}>
+      <BrandMark size={88} />
+      <Text style={styles.brandIntroTitle}>Ужгород Поруч</Text>
+      <Text style={styles.brandIntroSubtitle}>Офіційні міські сервіси</Text>
+    </Animated.View>
+    <View style={styles.brandIntroFooter}>
+      <ActivityIndicator size="small" color={COLORS.navy} />
+      <Text style={styles.brandIntroFooterText}>Завантажуємо місто</Text>
+    </View>
+  </SafeAreaView>;
 }
 
 function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
@@ -168,6 +264,18 @@ function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
   );
 }
 
+function useSwipeBack(onBack: () => void) {
+  return useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: (event) => event.nativeEvent.locationX <= 24,
+    onMoveShouldSetPanResponder: (_, gesture) => gesture.x0 <= 24 && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dx >= 84 && Math.abs(gesture.dy) < 80) {
+        onBack();
+      }
+    },
+  }).panHandlers, [onBack]);
+}
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     PublicSans_400Regular,
@@ -175,8 +283,12 @@ export default function App() {
     PublicSans_600SemiBold,
     PublicSans_700Bold,
   });
+  const [introVisible, setIntroVisible] = useState(true);
+  const introOpacity = useRef(new Animated.Value(0)).current;
+  const introScale = useRef(new Animated.Value(0.94)).current;
   const [section, setSection] = useState<"hub" | "transport">("hub");
-  const [activeTab, setActiveTab] = useState<RootTab>("services");
+  const [activeTab, setActiveTab] = useState<RootTab>("home");
+  const [weatherOpen, setWeatherOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<CityService | null>(null);
   const [routes, setRoutes] = useState<TransportRoute[]>([]);
   const [stops, setStops] = useState<TransportStop[]>([]);
@@ -192,6 +304,77 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const goBack = useCallback(() => {
+    if (section === "transport") {
+      if (mapScreen) {
+        setMapScreen(null);
+        return true;
+      }
+      if (schedule) {
+        setSchedule(null);
+        return true;
+      }
+      if (selectedRoute) {
+        setSchedule(null);
+        setMapScreen(null);
+        setRouteMapPreview(null);
+        setSelectedRoute(null);
+        return true;
+      }
+      if (selectedStop) {
+        setSelectedStop(null);
+        return true;
+      }
+      if (showDataSources) {
+        setShowDataSources(false);
+        return true;
+      }
+      setSection("hub");
+      setActiveTab("services");
+      return true;
+    }
+    if (weatherOpen) {
+      setWeatherOpen(false);
+      return true;
+    }
+    if (selectedService) {
+      setSelectedService(null);
+      return true;
+    }
+    if (activeTab !== "home") {
+      setActiveTab("home");
+      return true;
+    }
+    return false;
+  }, [activeTab, mapScreen, schedule, section, selectedRoute, selectedService, selectedStop, showDataSources, weatherOpen]);
+
+  const transportSwipeBack = useSwipeBack(goBack);
+
+  useEffect(() => {
+    if (!fontsLoaded) {
+      return;
+    }
+    const animation = Animated.sequence([
+      Animated.parallel([
+        Animated.timing(introOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
+        Animated.spring(introScale, { toValue: 1, friction: 8, tension: 60, useNativeDriver: true }),
+      ]),
+      Animated.delay(620),
+      Animated.timing(introOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
+    ]);
+    animation.start(({ finished }) => {
+      if (finished) {
+        setIntroVisible(false);
+      }
+    });
+    return () => animation.stop();
+  }, [fontsLoaded, introOpacity, introScale]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", goBack);
+    return () => subscription.remove();
+  }, [goBack]);
+
   useEffect(() => {
     if (section !== "transport") {
       return;
@@ -206,19 +389,20 @@ export default function App() {
     return null;
   }
 
+  if (introVisible) {
+    return <BrandIntro opacity={introOpacity} scale={introScale} />;
+  }
+
   function openTransportHub() {
     setSelectedService(null);
-    setActiveTab("transport");
+    setActiveTab("services");
     setSection("transport");
     setLoading(true);
   }
 
   function navigateToTab(tab: RootTab) {
-    if (tab === "transport") {
-      openTransportHub();
-      return;
-    }
     setSelectedService(null);
+    setWeatherOpen(false);
     setSection("hub");
     setActiveTab(tab);
   }
@@ -237,7 +421,7 @@ export default function App() {
       if (searchMode === "routes") {
         const [latestImport, foundRoutes] = await Promise.all([importRequest, getRoutes(searchQuery)]);
         setImportStatus(latestImport);
-        setRoutes(foundRoutes);
+        setRoutes(sortRoutesByNumber(foundRoutes));
       } else {
         const [latestImport, foundStops] = await Promise.all([importRequest, getStops(searchQuery)]);
         setImportStatus(latestImport);
@@ -277,7 +461,7 @@ export default function App() {
     setError(null);
     setSelectedRoute(null);
     try {
-      setSelectedStop({ stop, routes: await getStopRoutes(stop.id) });
+      setSelectedStop({ stop, routes: sortRoutesByNumber(await getStopRoutes(stop.id)) });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
@@ -297,12 +481,12 @@ export default function App() {
     }
   }
 
-  async function openMap(route: TransportRouteDetails) {
+  async function openMap(route: TransportRouteDetails, activeVariantId?: string) {
     setLoading(true);
     setError(null);
     try {
       const map = routeMapPreview?.routeId === route.id ? routeMapPreview : await getRouteMap(route.id);
-      setMapScreen({ route, map });
+      setMapScreen({ route, map, activeVariantId });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
@@ -311,6 +495,9 @@ export default function App() {
   }
 
   if (section === "hub") {
+    if (weatherOpen) {
+      return <WeatherScreen onBack={() => setWeatherOpen(false)} />;
+    }
     if (selectedService) {
       if (selectedService.id === "accessibility") {
         return <AccessibilityBuildingsScreen onBack={() => setSelectedService(null)} />;
@@ -318,15 +505,30 @@ export default function App() {
       if (selectedService.id === "parking") {
         return <ParkingScreen onBack={() => setSelectedService(null)} />;
       }
+      if (selectedService.id === "miniatures") {
+        return <MiniaturesScreen onBack={() => setSelectedService(null)} />;
+      }
       return <CityServiceDetails service={selectedService} onBack={() => setSelectedService(null)} />;
     }
-    if (activeTab === "notifications") {
+    if (activeTab === "feed") {
       return <NewsScreen onChangeTab={navigateToTab} />;
     }
     if (activeTab === "profile") {
       return <ProfileScreen onChangeTab={navigateToTab} />;
     }
-    return <CityServicesHub onOpenTransport={openTransportHub} onOpenService={setSelectedService} onChangeTab={navigateToTab} />;
+    if (activeTab === "services") {
+      return <CityServicesHub
+      onOpenTransport={openTransportHub}
+      onOpenService={setSelectedService}
+      onChangeTab={navigateToTab}
+      />;
+    }
+    return <HomeScreen
+      onOpenTransport={openTransportHub}
+      onOpenWeather={() => setWeatherOpen(true)}
+      onOpenService={openCityService}
+      onChangeTab={navigateToTab}
+    />;
   }
 
   if (loading) {
@@ -358,7 +560,7 @@ export default function App() {
         setSelectedRoute(null);
       }}
       onSelectStop={(stop) => void openSchedule(selectedRoute, stop)}
-      onOpenMap={() => void openMap(selectedRoute)}
+      onOpenMap={(variantId) => void openMap(selectedRoute, variantId)}
     />;
   }
 
@@ -375,52 +577,60 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...transportSwipeBack} style={styles.transportScreen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До сервісів" onPress={() => navigateToTab("services")} />
-      <View style={styles.transportPageTitleRow}>
-        <View>
-          <Text style={styles.transportPageTitle}>Громадський транспорт</Text>
-          <Text style={styles.transportPageDescription}>Офіційні маршрути та плановий графік руху містом.</Text>
+      <View style={styles.transportContent}>
+        <CivicHeader onOpenNotifications={() => navigateToTab("feed")} onOpenProfile={() => navigateToTab("profile")} />
+        <BackLink label="До сервісів" onPress={() => navigateToTab("services")} />
+        <View style={styles.transportPageTitleRow}>
+          <View style={styles.transportPageTitleCopy}>
+            <Text style={styles.transportPageTitle}>Громадський транспорт</Text>
+            <Text style={styles.transportPageDescription}>Офіційний перелік маршрутів, схем та затверджених графіків руху.</Text>
+          </View>
+          <View style={[styles.transportPlanMark, importStatus?.available && styles.transportPlanMarkAvailable]}>
+            <Ionicons name={importStatus?.available ? "checkmark-circle" : "time-outline"} size={13} color={importStatus?.available ? COLORS.green : "#795000"} />
+            <Text style={[styles.transportPlanMarkText, importStatus?.available && styles.transportPlanMarkTextAvailable]}>
+              {importStatus?.available ? "Розклад діє" : "Планові дані"}
+            </Text>
+          </View>
         </View>
-        <View style={styles.transportPlanMark}>
-          <View style={styles.eyebrowDot} />
-          <Text style={styles.transportPlanMarkText}>Планові дані</Text>
+        <View style={styles.transportSourceLine}>
+          <Ionicons name="information-circle-outline" size={16} color={COLORS.green} />
+          <View style={styles.transportSourceCopy}>
+            <Text style={styles.transportSourceTitle}>Затверджені планові дані</Text>
+            <Text style={styles.transportSourceText}>Маршрути, зупинки й планові розклади надходять з офіційного GTFS. Живі GPS-позиції показуємо на карті маршруту, коли вони доступні.</Text>
+            {importStatus?.completedAt ? <Text style={styles.transportUpdatedAt}>Оновлено: {formatUpdatedAt(importStatus.completedAt)}</Text> : null}
+          </View>
         </View>
-      </View>
-      <View style={styles.transportSourceLine}>
-        <Ionicons name="information-circle-outline" size={16} color={COLORS.green} />
-        <Text style={styles.transportSourceText}>Розклад і схеми з офіційного GTFS. Живі GPS-позиції недоступні.</Text>
-      </View>
-      <Pressable style={styles.dataSourcesInlineLink} onPress={() => setShowDataSources(true)}>
-        <Text style={styles.dataSourcesInlineLinkText}>Переглянути джерела даних</Text>
-        <Ionicons name="chevron-forward" size={15} color={COLORS.navy} />
-      </Pressable>
-      <View style={styles.searchBox}>
-        <Ionicons name="search-outline" size={20} color={COLORS.muted} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder={searchMode === "routes" ? "Знайти маршрут або зупинку" : "Назва зупинки"}
-          placeholderTextColor={COLORS.muted}
-          style={styles.searchInput}
-        />
-        <Ionicons name="options-outline" size={20} color={COLORS.navy} />
-      </View>
-      <View style={styles.searchModes}>
-        <Pressable
-          style={[styles.searchMode, searchMode === "routes" && styles.searchModeActive]}
-          onPress={() => setSearchMode("routes")}
-        >
-          <Text style={[styles.searchModeText, searchMode === "routes" && styles.searchModeTextActive]}>Маршрути</Text>
+        <Pressable style={styles.dataSourcesInlineLink} onPress={() => setShowDataSources(true)}>
+          <Text style={styles.dataSourcesInlineLinkText}>Переглянути джерела даних</Text>
+          <Ionicons name="chevron-forward" size={15} color={COLORS.navy} />
         </Pressable>
-        <Pressable
-          style={[styles.searchMode, searchMode === "stops" && styles.searchModeActive]}
-          onPress={() => setSearchMode("stops")}
-        >
-          <Text style={[styles.searchModeText, searchMode === "stops" && styles.searchModeTextActive]}>Зупинки</Text>
-        </Pressable>
+        <View style={styles.searchBox}>
+          <Ionicons name="search-outline" size={20} color={COLORS.muted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={searchMode === "routes" ? "Знайти маршрут або зупинку" : "Назва зупинки"}
+            placeholderTextColor={COLORS.muted}
+            style={styles.searchInput}
+          />
+          <Ionicons name="options-outline" size={20} color={COLORS.navy} />
+        </View>
+        <View style={styles.searchModes}>
+          <Pressable
+            style={[styles.searchMode, searchMode === "routes" && styles.searchModeActive]}
+            onPress={() => setSearchMode("routes")}
+          >
+            <Text style={[styles.searchModeText, searchMode === "routes" && styles.searchModeTextActive]}>Маршрути</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.searchMode, searchMode === "stops" && styles.searchModeActive]}
+            onPress={() => setSearchMode("stops")}
+          >
+            <Text style={[styles.searchModeText, searchMode === "stops" && styles.searchModeTextActive]}>Зупинки</Text>
+          </Pressable>
+        </View>
       </View>
       {searchMode === "routes" ? (
         <FlatList
@@ -432,11 +642,15 @@ export default function App() {
               <View style={styles.routeBadge}>
                 <Text style={styles.routeBadgeText}>{item.routeNumber}</Text>
               </View>
-              <Text style={styles.routeName}>{item.name}</Text>
+              <View style={styles.routeCardCopy}>
+                <Text style={styles.routeName}>{item.name}</Text>
+                <Text style={styles.routeCardMeta}>Схема зупинок і плановий розклад</Text>
+              </View>
               <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
             </Pressable>
           )}
-          ListEmptyComponent={<Text style={styles.empty}>Маршрутів поки немає.</Text>}
+          ListHeaderComponent={<Text style={styles.transportListHeading}>{query ? "Результати пошуку" : "Усі маршрути"}</Text>}
+          ListEmptyComponent={<TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("stops")} />}
         />
       ) : (
         <FlatList
@@ -452,10 +666,11 @@ export default function App() {
               <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
             </Pressable>
           )}
-          ListEmptyComponent={<Text style={styles.empty}>Зупинок не знайдено.</Text>}
+          ListHeaderComponent={<Text style={styles.transportListHeading}>{query ? "Результати пошуку" : "Усі зупинки"}</Text>}
+          ListEmptyComponent={<TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("routes")} />}
         />
       )}
-      <BottomNavigation activeTab="transport" onChangeTab={navigateToTab} />
+      <BottomNavigation activeTab="services" onChangeTab={navigateToTab} />
     </SafeAreaView>
   );
 }
@@ -473,158 +688,349 @@ function CityServicesHub({
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.hubContent}>
-        <CivicHeader />
+        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
         <View style={styles.pageIntro}>
           <View style={styles.eyebrowRow}>
             <View style={styles.eyebrowDot} />
-            <Text style={styles.eyebrow}>Офіційні дані міської ради</Text>
+          <Text style={styles.eyebrow}>Усе для міста</Text>
           </View>
-          <Text style={styles.pageTitle}>Міські сервіси</Text>
-          <Text style={styles.pageDescription}>Зручний доступ до щоденних міських розкладів, реєстрів та офіційних довідок громади.</Text>
+          <Text style={styles.pageTitle}>Сервіси</Text>
+          <Text style={styles.pageDescription}>Обирайте за тим, що потрібно зробити просто зараз.</Text>
         </View>
 
-        <Pressable style={styles.transportHero} onPress={onOpenTransport}>
-          <View style={styles.transportHeroTop}>
-            <View style={styles.transportHeroIcon}>
-              <Ionicons name="bus-outline" size={22} color={COLORS.gold} />
+        {SERVICE_CATEGORIES.map((category, index) => {
+          const services = CITY_SERVICES.filter((service) => service.category === category.id);
+          return (
+            <View key={category.id} style={index === 0 ? styles.serviceCategoryFirst : styles.serviceCategory}>
+              <View style={styles.serviceGroupHeading}>
+                <Text style={styles.serviceGroupTitle}>{category.title}</Text>
+              </View>
+              <View style={styles.serviceGrid}>
+                {category.id === "mobility" ? <ServiceGridCard icon="bus-outline" title="Громадський транспорт" onPress={onOpenTransport} /> : null}
+                {services.map((service) => <ServiceGridCard key={service.id} icon={service.icon} title={service.title} onPress={() => onOpenService(service)} />)}
+              </View>
             </View>
-            <View style={styles.transportHeroBadge}>
-              <Text style={styles.transportHeroBadgeText}>ПЛАНОВИЙ РОЗКЛАД</Text>
-            </View>
-          </View>
-          <Text style={styles.transportHeroTitle}>Громадський транспорт</Text>
-          <Text style={styles.transportHeroText}>Маршрути комунальних автобусів, зупинки та плановий графік руху містом.</Text>
-          <View style={styles.transportHeroButton}>
-            <Text style={styles.transportHeroButtonText}>Переглянути розклад</Text>
-            <Ionicons name="arrow-forward" size={19} color={COLORS.navyDark} />
-          </View>
-        </Pressable>
-
-        <View style={styles.riverNote}>
-          <View style={styles.riverNoteIcon}>
-            <Ionicons name="water-outline" size={21} color={COLORS.navy} />
-          </View>
-          <View style={styles.riverNoteText}>
-            <Text style={styles.riverNoteEyebrow}>Міський простір</Text>
-            <Text style={styles.riverNoteTitle}>Набережна Незалежності</Text>
-            <Text style={styles.riverNoteDescription}>Планові графіки та відкриті реєстри</Text>
-          </View>
-        </View>
-
-        <View style={styles.sectionHeadingRow}>
-          <Text style={styles.sectionLabel}>Муніципальні розділи</Text>
-          <View style={styles.officialMark}>
-            <Ionicons name="checkmark-circle-outline" size={14} color={COLORS.green} />
-            <Text style={styles.officialMarkText}>Офіційні джерела</Text>
-          </View>
-        </View>
-        {CITY_SERVICES.map((service) => (
-          <Pressable key={service.id} style={styles.serviceRow} onPress={() => onOpenService(service)}>
-            <View style={styles.serviceRowIcon}>
-              <Ionicons name={service.icon} size={22} color={COLORS.navy} />
-            </View>
-            <View style={styles.serviceRowText}>
-              <Text style={styles.serviceRowTitle}>{service.title}</Text>
-              <Text numberOfLines={2} style={styles.serviceRowDescription}>{service.description}</Text>
-            </View>
-            {service.id === "announcements" || service.id === "silence" ? <View style={styles.serviceGoldDot} /> : null}
-            <Ionicons name="chevron-forward" size={19} color={COLORS.muted} />
-          </Pressable>
-        ))}
-
-        <Pressable style={styles.openDataRow} onPress={() => onChangeTab("notifications")}>
-          <View style={styles.serviceRowIcon}>
-            <Ionicons name="open-outline" size={21} color={COLORS.navy} />
-          </View>
-          <View style={styles.serviceRowText}>
-            <Text style={styles.serviceRowTitle}>Портал відкритих даних</Text>
-            <Text style={styles.serviceRowDescription}>Офіційні публічні набори міської ради</Text>
-          </View>
-          <Ionicons name="open-outline" size={19} color={COLORS.muted} />
-        </Pressable>
-
-        <View style={styles.hubFooter}>
-          <Ionicons name="shield-checkmark-outline" size={18} color={COLORS.muted} />
-          <Text style={styles.hubFootnote}>Посилання ведуть лише на офіційні міські сервіси й відкриті дані. Без платежів та екстрених сповіщень.</Text>
-        </View>
+          );
+        })}
       </ScrollView>
       <BottomNavigation activeTab="services" onChangeTab={onChangeTab} />
     </SafeAreaView>
   );
 }
 
+function ServiceGridCard({ icon, title, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; onPress: () => void }) {
+  return <Pressable style={styles.serviceGridCard} onPress={onPress}>
+    <View style={styles.serviceGridIcon}><Ionicons name={icon} size={23} color={COLORS.navy} /></View>
+    <View style={styles.serviceGridFooter}>
+      <Text numberOfLines={2} style={styles.serviceGridTitle}>{title}</Text>
+      <Ionicons name="arrow-forward" size={16} color={COLORS.navy} />
+    </View>
+  </Pressable>;
+}
+
 function HomeScreen({
   onOpenTransport,
+  onOpenWeather,
   onOpenService,
   onChangeTab,
 }: {
   onOpenTransport: () => void;
+  onOpenWeather: () => void;
   onOpenService: (id: CityService["id"]) => void;
   onChangeTab: (tab: RootTab) => void;
 }) {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.homeContent}>
-        <Text style={styles.cityKicker}>УЖГОРОД</Text>
-        <Text style={styles.homeTitle}>Цифрові сервіси</Text>
-        <Text style={styles.homeIntro}>Зручні міські справи, офіційні дані та перевірені переходи в одному місці.</Text>
-        <View style={styles.statusBanner}>
-          <Text style={styles.statusDot}>●</Text>
-          <Text style={styles.statusText}>Лише офіційні сервіси та відкриті дані</Text>
+      <ScrollView contentContainerStyle={styles.dashboardContent}>
+        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
+        <View style={styles.dashboardTop}>
+          <View>
+            <Text style={styles.dashboardDate}>{formatDashboardDate()}</Text>
+            <Text style={styles.dashboardDay}>{formatDashboardDay()}</Text>
+          </View>
+          <View style={styles.dashboardCityChip}>
+            <Ionicons name="location-outline" size={16} color={COLORS.navyDark} />
+            <Text style={styles.dashboardCityText}>Ужгород</Text>
+          </View>
         </View>
-        <Pressable style={styles.homeTransportCard} onPress={onOpenTransport}>
-          <Text style={styles.homeTransportKicker}>ГРОМАДСЬКИЙ ТРАНСПОРТ</Text>
-          <Text style={styles.homeTransportTitle}>Маршрути й плановий розклад</Text>
-          <Text style={styles.homeTransportText}>Шукайте маршрут або зупинку, дивіться схему та заплановані відправлення.</Text>
-          <Text style={styles.homeTransportAction}>Відкрити транспорт →</Text>
-        </Pressable>
-        <Text style={styles.sectionLabel}>Сервіси поруч</Text>
-        <View style={styles.homeFeatureGrid}>
-          <Pressable style={styles.homeFeatureCard} onPress={() => onOpenService("accessibility")}>
-            <Text style={styles.homeFeatureIcon}>◌</Text>
-            <Text style={styles.homeFeatureTitle}>Доступне місто</Text>
-            <Text style={styles.homeFeatureText}>Реєстр перевірених будівель</Text>
-            <Text style={styles.homeFeatureAction}>Переглянути →</Text>
-          </Pressable>
-          <Pressable style={styles.homeFeatureCard} onPress={() => onOpenService("silence")}>
-            <Text style={styles.homeFeatureIcon}>◐</Text>
-            <Text style={styles.homeFeatureTitle}>Хвилина мовчання</Text>
-            <Text style={styles.homeFeatureText}>Щодня о 09:00</Text>
-            <Text style={styles.homeFeatureAction}>Пам’ятати разом →</Text>
-          </Pressable>
+
+        <WeatherPreview onPress={onOpenWeather} />
+
+        <AirAlertBanner />
+
+        <CurrencyWidget />
+
+        <View style={styles.dashboardSectionRow}>
+          <Text style={styles.dashboardSectionTitle}>Важливе</Text>
+          <Pressable onPress={() => onChangeTab("feed")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
         </View>
-        <Text style={styles.sectionLabel}>Швидкий доступ</Text>
-        <Pressable style={styles.homeRow} onPress={() => onChangeTab("services")}>
-          <Text style={styles.homeRowIcon}>▦</Text>
-          <View style={styles.homeRowText}><Text style={styles.homeRowTitle}>Міські сервіси</Text><Text style={styles.homeRowDescription}>Доступність, паркування, хвилина мовчання</Text></View>
-          <Text style={styles.homeChevron}>›</Text>
-        </Pressable>
-        <Pressable style={styles.homeRow} onPress={() => onChangeTab("notifications")}>
-          <Text style={styles.homeRowIcon}>▤</Text>
-          <View style={styles.homeRowText}><Text style={styles.homeRowTitle}>Новини та оголошення</Text><Text style={styles.homeRowDescription}>Офіційна стрічка міської ради</Text></View>
-          <Text style={styles.homeChevron}>›</Text>
-        </Pressable>
+        <OfficialNewsPreview onOpenFeed={() => onChangeTab("feed")} />
+
+        <View style={styles.dashboardSectionRow}>
+          <Text style={styles.dashboardSectionTitle}>Популярні сервіси</Text>
+          <Pressable onPress={() => onChangeTab("services")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dashboardServicesRow}>
+          <DashboardServiceCard icon="bus-outline" title="Рух транспорту" onPress={onOpenTransport} />
+          <DashboardServiceCard icon="car-outline" title="Паркування" onPress={() => onOpenService("parking")} />
+          <DashboardServiceCard icon="accessibility-outline" title="Доступне місто" onPress={() => onOpenService("accessibility")} />
+          <DashboardServiceCard icon="document-text-outline" title="Запис до ЦНАП" onPress={() => onOpenService("cnap")} />
+        </ScrollView>
       </ScrollView>
-      <BottomNavigation activeTab="services" onChangeTab={onChangeTab} />
+      <BottomNavigation activeTab="home" onChangeTab={onChangeTab} />
     </SafeAreaView>
   );
 }
 
+function DashboardServiceCard({ icon, title, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; onPress: () => void }) {
+  return <Pressable style={styles.dashboardServiceCard} onPress={onPress}>
+    <View style={styles.dashboardServiceIcon}><Ionicons name={icon} size={24} color={COLORS.navy} /></View>
+    <Text style={styles.dashboardServiceTitle}>{title}</Text>
+  </Pressable>;
+}
+
+function OfficialNewsPreview({ onOpenFeed }: { onOpenFeed: () => void }) {
+  const [data, setData] = useState<OfficialNewsList | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    void getOfficialNews().then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <View style={styles.dashboardFeedCard}><ActivityIndicator color={COLORS.navy} /><Text style={styles.dashboardFeedText}>Завантажуємо офіційні новини…</Text></View>;
+  }
+
+  if (!data?.items.length) {
+    return <Pressable style={styles.dashboardFeedCard} onPress={onOpenFeed}>
+      <View style={styles.dashboardFeedIcon}><Ionicons name="megaphone-outline" size={22} color={COLORS.navy} /></View>
+      <View style={styles.dashboardFeedCopy}>
+        <Text style={styles.dashboardFeedTitle}>Новини міста</Text>
+        <Text style={styles.dashboardFeedText}>Офіційна стрічка тимчасово недоступна.</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={19} color={COLORS.muted} />
+    </Pressable>;
+  }
+
+  return <View style={styles.homeNewsList}>
+    {data.items.slice(0, 3).map((item) => <Pressable key={item.sourceUrl} style={styles.homeNewsItem} onPress={() => void openOfficialLink(item.sourceUrl)}>
+      <View style={styles.homeNewsIcon}><Ionicons name="megaphone-outline" size={18} color={COLORS.navy} /></View>
+      <View style={styles.homeNewsCopy}>
+        <Text numberOfLines={2} style={styles.homeNewsTitle}>{item.title}</Text>
+        <Text style={styles.homeNewsMeta}>{item.publishedLabel ?? "Офіційна публікація"}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+    </Pressable>)}
+    <Pressable style={styles.homeNewsAllButton} onPress={onOpenFeed}>
+      <Text style={styles.homeNewsAllText}>Вся стрічка новин</Text>
+      <Ionicons name="arrow-forward" size={16} color={COLORS.navy} />
+    </Pressable>
+  </View>;
+}
+
+function CurrencyWidget() {
+  const [data, setData] = useState<CurrencyRates | null>(null);
+
+  useEffect(() => {
+    void getCurrencyRates().then(setData).catch(() => setData(null));
+  }, []);
+
+  const mainRates = data?.rates ?? [];
+  return (
+    <View style={styles.currencyWidget}>
+      <View style={styles.currencyWidgetHeading}>
+        <View style={styles.currencyWidgetTitleRow}>
+          <Ionicons name="cash-outline" size={19} color={COLORS.navy} />
+          <Text style={styles.currencyWidgetTitle}>Курс валют</Text>
+        </View>
+        <Text style={styles.currencyWidgetSource}>Monobank</Text>
+      </View>
+      {mainRates.length > 0 ? <View style={styles.currencyRatesRow}>
+        {mainRates.map((rate) => <View key={rate.code} style={styles.currencyRate}>
+          <Text style={styles.currencyCode}>{rate.code}</Text>
+          <Text style={styles.currencyValue}>{formatCurrency(rate.sell)}</Text>
+          <Text style={styles.currencyMeta}>продаж</Text>
+        </View>)}
+      </View> : <Text style={styles.currencyUnavailable}>Курси тимчасово завантажуються</Text>}
+      {data?.stale ? <Text style={styles.currencyStale}>Показано останнє доступне оновлення</Text> : null}
+    </View>
+  );
+}
+
+function WeatherPreview({ onPress }: { onPress: () => void }) {
+  const [data, setData] = useState<Weather | null>(null);
+
+  useEffect(() => {
+    void getWeather().then(setData).catch(() => setData(null));
+  }, []);
+
+  const airQuality = data?.current.airQuality;
+  return <Pressable style={styles.weatherFeatureCard} onPress={onPress}>
+    <View style={styles.weatherFeatureMain}>
+      <View>
+        <Text style={styles.weatherFeatureLabel}>Погода зараз</Text>
+        <View style={styles.weatherFeatureTemperatureRow}>
+          <Text style={styles.weatherFeatureTemperature}>{data ? `${Math.round(data.current.temperatureC)}°` : "—"}</Text>
+          {data ? <Image source={{ uri: data.current.iconUrl }} style={styles.weatherFeatureIcon} /> : <Ionicons name="partly-sunny-outline" size={38} color={COLORS.navy} />}
+        </View>
+        <Text style={styles.weatherFeatureCondition}>{data ? data.current.condition : "Оновлюємо дані"}</Text>
+      </View>
+    </View>
+    <View style={styles.weatherFeatureAir}>
+      <Ionicons name="leaf-outline" size={21} color={COLORS.green} />
+      <Text style={styles.weatherFeatureAirLabel}>Якість повітря</Text>
+      <Text style={styles.weatherFeatureAirValue}>{airQuality ? airQualityLabel(airQuality.index) : "Оновлюємо"}</Text>
+      <Text style={styles.weatherFeatureAirMeta}>{airQuality ? `PM2.5 ${Math.round(airQuality.pm25)}` : ""}</Text>
+    </View>
+    <Ionicons name="chevron-forward" size={17} color={COLORS.muted} style={styles.weatherFeatureChevron} />
+  </Pressable>;
+}
+
+function AirAlertBanner() {
+  const [data, setData] = useState<AirAlertStatus | null>(null);
+
+  useEffect(() => {
+    void loadStatus();
+    const timer = setInterval(() => void loadStatus(), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  async function loadStatus() {
+    try {
+      setData(await getAirAlertStatus());
+    } catch {
+      setData(null);
+    }
+  }
+
+  if (!data || data.state === "UNAVAILABLE") {
+    return null;
+  }
+
+  const state = data.state;
+  const icon = state === "ACTIVE" ? "warning-outline" : "shield-checkmark-outline";
+  return (
+    <Pressable style={[styles.airAlertBanner, state === "ACTIVE" ? styles.airAlertBannerActive : styles.airAlertBannerClear]} onPress={() => void openOfficialLink("https://www.ukrainealarm.com/")}>
+      <View style={[styles.airAlertIcon, state === "ACTIVE" ? styles.airAlertIconActive : styles.airAlertIconClear]}><Ionicons name={icon} size={19} color={state === "ACTIVE" ? "#a31d1d" : COLORS.green} /></View>
+      <View style={styles.airAlertCopy}>
+        <Text style={[styles.airAlertTitle, state === "ACTIVE" && styles.airAlertTitleActive]}>{data.title}</Text>
+        {state === "ACTIVE" ? <Text style={styles.airAlertTextActive}>{data.detail}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={17} color={state === "ACTIVE" ? "#a31d1d" : COLORS.green} />
+    </Pressable>
+  );
+}
+
+function WeatherScreen({ onBack }: { onBack: () => void }) {
+  const [data, setData] = useState<Weather | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState(0);
+  const swipeBack = useSwipeBack(onBack);
+
+  useEffect(() => {
+    void loadWeather();
+  }, []);
+
+  async function loadWeather() {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await getWeather());
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const day = data?.days[selectedDay];
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <CivicHeader />
+    <BackLink label="На головну" onPress={onBack} />
+    <ScrollView contentContainerStyle={styles.weatherContent}>
+      <View style={styles.detailIntro}>
+        <Text style={styles.detailTitle}>Погода в Ужгороді</Text>
+        <Text style={styles.detailDescription}>Актуальні умови та погодинний прогноз.</Text>
+      </View>
+      {loading ? <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} /> : null}
+      {error ? <View style={styles.inlineError}>
+        <Text style={styles.inlineErrorText}>{error}</Text>
+        <Pressable onPress={() => void loadWeather()}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable>
+      </View> : null}
+      {data ? <>
+        <View style={styles.weatherHero}>
+          <View style={styles.weatherHeroTop}>
+            <View>
+              <Text style={styles.weatherHeroTemperature}>{Math.round(data.current.temperatureC)}°</Text>
+              <Text style={styles.weatherHeroCondition}>{data.current.condition}</Text>
+            </View>
+            <Image source={{ uri: data.current.iconUrl }} style={styles.weatherHeroIcon} />
+          </View>
+          <View style={styles.weatherMetrics}>
+            <WeatherMetric icon="thermometer-outline" label="Відчувається" value={`${Math.round(data.current.feelsLikeC)}°`} />
+            <WeatherMetric icon="water-outline" label="Вологість" value={`${data.current.humidity}%`} />
+            <WeatherMetric icon="flag-outline" label="Вітер" value={`${Math.round(data.current.windKph)} км/год`} />
+          </View>
+        </View>
+        {data.current.airQuality && <View style={styles.weatherAirQualityCard}>
+          <View style={styles.weatherAirQualityIcon}><Ionicons name="leaf-outline" size={21} color={COLORS.green} /></View>
+          <View style={styles.weatherAirQualityCopy}>
+            <Text style={styles.weatherAirQualityLabel}>Якість повітря</Text>
+            <Text style={styles.weatherAirQualityValue}>{airQualityLabel(data.current.airQuality.index)}</Text>
+          </View>
+          <Text style={styles.weatherAirQualityMeta}>PM2.5 {Math.round(data.current.airQuality.pm25)}{`\n`}PM10 {Math.round(data.current.airQuality.pm10)}</Text>
+        </View>}
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weatherDayTabs}>
+          {data.days.map((item, index) => <Pressable key={item.date} onPress={() => setSelectedDay(index)} style={[styles.weatherDayTab, selectedDay === index && styles.weatherDayTabActive]}>
+            <Text style={[styles.weatherDayTabText, selectedDay === index && styles.weatherDayTabTextActive]}>{formatWeatherDay(item.date, index)}</Text>
+            <Text style={[styles.weatherDayTabTemperature, selectedDay === index && styles.weatherDayTabTextActive]}>{Math.round(item.minTemperatureC)}° · {Math.round(item.maxTemperatureC)}°</Text>
+          </Pressable>)}
+        </ScrollView>
+
+        {day ? <>
+          <View style={styles.weatherDaySummary}>
+            <View><Text style={styles.weatherDaySummaryTitle}>{day.condition}</Text><Text style={styles.weatherDaySummaryText}>Опади: {day.chanceOfRain}%</Text></View>
+            <View style={styles.weatherSunTimes}><Text style={styles.weatherSunTime}>↑ {day.sunrise}</Text><Text style={styles.weatherSunTime}>↓ {day.sunset}</Text></View>
+          </View>
+          <Text style={styles.weatherSectionTitle}>Погодинно</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weatherHours}>
+            {day.hours.map((hour) => <View key={hour.time} style={styles.weatherHourCard}>
+              <Text style={styles.weatherHourTime}>{formatWeatherHour(hour.time)}</Text>
+              <Image source={{ uri: hour.iconUrl }} style={styles.weatherHourIcon} />
+              <Text style={styles.weatherHourTemperature}>{Math.round(hour.temperatureC)}°</Text>
+              <Text style={styles.weatherHourRain}>{hour.chanceOfRain}%</Text>
+            </View>)}
+          </ScrollView>
+        </> : null}
+        <Text style={styles.weatherSource}>Дані про погоду: WeatherAPI.com · оновлено {formatUpdatedAt(data.fetchedAt)}</Text>
+        {data.stale ? <Text style={styles.weatherStale}>Показано останнє доступне оновлення.</Text> : null}
+      </> : null}
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function WeatherMetric({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return <View style={styles.weatherMetric}><Ionicons name={icon} size={16} color="#d3e4ff" /><Text style={styles.weatherMetricLabel}>{label}</Text><Text style={styles.weatherMetricValue}>{value}</Text></View>;
+}
+
 function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
-  const [data, setData] = useState<OpenDataDatasetList | null>(null);
+  const [data, setData] = useState<OfficialNewsList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadLatestDatasets();
+    void loadNews();
   }, []);
 
-  async function loadLatestDatasets() {
+  async function loadNews() {
     setLoading(true);
     setError(null);
     try {
-      setData(await getLatestOpenDataDatasets());
+      setData(await getOfficialNews());
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
@@ -636,52 +1042,53 @@ function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.simpleTabContent}>
-        <CivicHeader />
+        <CivicHeader onOpenProfile={() => onChangeTab("profile")} />
         <View style={styles.pageIntro}>
           <View style={styles.eyebrowRow}>
             <View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} />
-            <Text style={styles.eyebrow}>Офіційний вісник</Text>
-          </View>
-          <Text style={styles.pageTitle}>Події та оголошення</Text>
-          <Text style={styles.pageDescription}>Планові повідомлення міських служб і нові набори офіційних відкритих даних.</Text>
+          <Text style={styles.eyebrow}>Офіційний вісник</Text>
         </View>
-        <Pressable style={styles.officialNewsButton} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
-          <Ionicons name="megaphone-outline" size={20} color="#ffffff" />
-          <Text style={styles.officialNewsButtonText}>Відкрити офіційну стрічку</Text>
-          <Ionicons name="open-outline" size={18} color="#ffffff" />
+          <Text style={styles.pageTitle}>Стрічка</Text>
+        </View>
+        <Pressable style={styles.newsSourceLine} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
+          <Ionicons name="megaphone-outline" size={18} color={COLORS.navy} />
+          <Text style={styles.newsSourceLineText}>Джерело: Ужгородська міська рада</Text>
+          <Ionicons name="open-outline" size={16} color={COLORS.navy} />
         </Pressable>
-        <View style={styles.sectionHeadingRow}>
-          <Text style={styles.sectionLabel}>Оновлення відкритих даних</Text>
-          <Ionicons name="document-text-outline" size={17} color={COLORS.navy} />
+        <View style={styles.newsListHeading}>
+          <Text style={styles.newsListHeadingTitle}>Останні новини</Text>
+          <Text style={styles.newsListHeadingMeta}>Офіційно</Text>
         </View>
-        <Text style={styles.newsSectionIntro}>Назви та дати оновлення надходять із міського порталу. Повний опис і файли залишаються в першоджерелі.</Text>
         {loading && <ActivityIndicator style={styles.inlineLoader} color="#123a63" />}
         {error && (
           <View style={styles.inlineError}>
             <Text style={styles.inlineErrorText}>{error}</Text>
-            <Pressable onPress={() => void loadLatestDatasets()}>
+            <Pressable onPress={() => void loadNews()}>
               <Text style={styles.inlineRetry}>Спробувати ще раз</Text>
             </Pressable>
           </View>
         )}
-        {data?.stale && <Text style={styles.staleData}>Показуємо збережену версію даних — перевіряємо оновлення.</Text>}
-        {data?.datasets.map((dataset) => (
-          <Pressable key={dataset.sourceUrl} style={styles.newsDatasetCard} onPress={() => void openOfficialLink(dataset.sourceUrl)}>
-            <Text style={styles.newsDatasetTitle}>{dataset.title}</Text>
-            <Text numberOfLines={3} style={styles.newsDatasetDescription}>{dataset.description}</Text>
-            <View style={styles.newsDatasetFooter}>
-              <Text style={styles.newsDatasetMeta}>{dataset.updatedAt ? `Оновлено ${formatUpdatedAt(dataset.updatedAt)}` : "Дата оновлення не вказана"}</Text>
-              <Ionicons name="open-outline" size={18} color={COLORS.navy} />
+        {data?.stale && <Text style={styles.staleData}>Показуємо збережену версію стрічки — перевіряємо оновлення.</Text>}
+        {data?.items.slice(0, 10).map((item) => (
+          <Pressable key={item.sourceUrl} style={styles.newsArticleCard} onPress={() => void openOfficialLink(item.sourceUrl)}>
+            <View style={styles.newsArticleTop}>
+              <View style={styles.newsArticleIcon}><Ionicons name="megaphone-outline" size={17} color={COLORS.navy} /></View>
+              <Text style={styles.newsArticleDate}>{item.publishedLabel ?? "Дата не вказана"}</Text>
+            </View>
+            <Text numberOfLines={2} style={styles.newsArticleTitle}>{item.title}</Text>
+            <View style={styles.newsArticleAction}>
+              <Text style={styles.newsArticleActionText}>Відкрити на сайті</Text>
+              <Ionicons name="arrow-forward" size={16} color={COLORS.navy} />
             </View>
           </Pressable>
         ))}
-        {!loading && !error && data?.datasets.length === 0 && <Text style={styles.empty}>Оновлень поки немає.</Text>}
-        <View style={styles.sourceTransparencyCard}>
-          <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
-          <Text style={styles.sourceTransparencyText}>Не дублюємо повні тексти новин, щоб користувач завжди бачив оригінальну публікацію та актуальний контекст.</Text>
-        </View>
+        {!loading && !error && data?.items.length === 0 && <Text style={styles.empty}>Новин поки немає.</Text>}
+        {data && data.items.length > 10 ? <Pressable style={styles.newsMoreLink} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
+          <Text style={styles.newsMoreLinkText}>Усі новини на сайті міськради</Text>
+          <Ionicons name="open-outline" size={16} color={COLORS.navy} />
+        </Pressable> : null}
       </ScrollView>
-      <BottomNavigation activeTab="notifications" onChangeTab={onChangeTab} />
+      <BottomNavigation activeTab="feed" onChangeTab={onChangeTab} />
     </SafeAreaView>
   );
 }
@@ -691,35 +1098,67 @@ function ProfileScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void })
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.simpleTabContent}>
-        <CivicHeader />
-        <View style={styles.profileIntroCard}>
-          <View style={styles.profileIntroIcon}>
-            <Ionicons name="person-outline" size={28} color={COLORS.navy} />
+        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} />
+        <View style={styles.pageIntro}>
+          <View style={styles.eyebrowRow}>
+            <View style={styles.eyebrowDot} />
+            <Text style={styles.eyebrow}>Ваш простір</Text>
           </View>
-          <View style={styles.profileIntroText}>
-            <Text style={styles.pageTitle}>Ваш цифровий простір</Text>
-            <Text style={styles.profileIntroDescription}>Базові міські сервіси доступні без реєстрації та без персонального профілю.</Text>
+          <Text style={styles.pageTitle}>Налаштування</Text>
+          <Text style={styles.pageDescription}>Керуйте тим, як застосунок виглядає та повідомляє важливе.</Text>
+        </View>
+        <View style={styles.profileAppCard}>
+          <View style={styles.profileAppMark}><BrandMark size={44} /></View>
+          <View style={styles.profileAppCopy}>
+            <Text style={styles.profileAppTitle}>Ужгород Поруч</Text>
+            <Text style={styles.profileAppText}>Працює без акаунта. Особисті дані не збираємо.</Text>
           </View>
+          <View style={styles.profileVersionPill}><Text style={styles.profileVersionText}>v1.0</Text></View>
         </View>
 
-        <Text style={styles.profileSectionTitle}>Доступність і дані</Text>
+        <Text style={styles.profileSectionTitle}>Налаштування застосунку</Text>
         <View style={styles.profileGroup}>
-          <ProfileRow icon="language-outline" title="Мова застосунку" value="Українська" />
-          <ProfileRow icon="accessibility-outline" title="Доступність" value="Налаштування екрана" />
-          <ProfileRow icon="shield-checkmark-outline" title="Приватність і дані" value="Без реєстрації" />
+          <ProfileRow
+            icon="notifications-outline"
+            title="Сповіщення"
+            value="Ще не підключені"
+            onPress={() => Alert.alert("Сповіщення ще не підключені", "Підключимо їх лише через підтверджений офіційний канал. Зокрема, тоді зможемо коректно нагадувати про хвилину мовчання.")}
+          />
+          <ProfileRow icon="language-outline" title="Мова" value="Українська" />
         </View>
 
-        <Text style={styles.profileSectionTitle}>Міська інформація та підтримка</Text>
+        <Text style={styles.profileSectionTitle}>Доступність</Text>
+        <View style={styles.profileGroup}>
+          <ProfileRow
+            icon="text-outline"
+            title="Розмір тексту"
+            value="Налаштування пристрою"
+            onPress={() => void Linking.openSettings()}
+          />
+          <ProfileRow
+            icon="contrast-outline"
+            title="Високий контраст"
+            value="Налаштування пристрою"
+            onPress={() => void Linking.openSettings()}
+          />
+        </View>
+
+        <Text style={styles.profileSectionTitle}>Підтримка й інформація</Text>
         <View style={styles.profileGroup}>
           <ProfileRow icon="open-outline" title="Офіційний сайт міської ради" onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")} />
-          <ProfileRow icon="open-outline" title="Портал відкритих даних" onPress={() => void openOfficialLink("https://data.rada-uzhgorod.gov.ua/")} />
-          <ProfileRow icon="information-circle-outline" title="Про застосунок" value="Версія 1.0" />
+          <ProfileRow
+            icon="information-circle-outline"
+            title="Про застосунок"
+            value="Версія 1.0"
+            onPress={() => Alert.alert("Ужгород Поруч", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")}
+          />
         </View>
 
         <View style={styles.profilePrivacyNote}>
           <Ionicons name="lock-closed-outline" size={20} color={COLORS.navy} />
-          <Text style={styles.profilePrivacyText}>Застосунок не збирає номер авто, платіжні дані чи персональну інформацію для базових сервісів.</Text>
+          <Text style={styles.profilePrivacyText}>Базові сервіси не потребують номера авто, платіжних чи інших персональних даних.</Text>
         </View>
+        <Text style={styles.profileFooter}>Ужгород Поруч · міський застосунок</Text>
       </ScrollView>
       <BottomNavigation activeTab="profile" onChangeTab={onChangeTab} />
     </SafeAreaView>
@@ -751,11 +1190,105 @@ function ProfileRow({
   );
 }
 
-function BottomNavigation({ activeTab, onChangeTab }: { activeTab: RootTab; onChangeTab: (tab: RootTab) => void }) {
+function MiniaturesScreen({ onBack }: { onBack: () => void }) {
+  const [data, setData] = useState<MiniSculptureList | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const swipeBack = useSwipeBack(onBack);
+
+  useEffect(() => {
+    void loadCatalog();
+  }, []);
+
+  async function loadCatalog() {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await getMiniSculptures());
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <SafeAreaView {...swipeBack} style={styles.screen}>
+      <StatusBar style="dark" />
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <View style={styles.detailIntro}>
+        <View style={styles.eyebrowRow}>
+          <View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} />
+          <Text style={styles.eyebrow}>Власний каталог міста</Text>
+        </View>
+        <Text style={styles.detailTitle}>Мініскульптури Ужгорода</Text>
+        <Text style={styles.detailDescription}>Знайдіть маленькі символи міста на одній мапі та відкрийте точну локацію для прогулянки.</Text>
+      </View>
+      {loading && <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} />}
+      {error && (
+        <View style={styles.inlineError}>
+          <Text style={styles.inlineErrorText}>{error}</Text>
+          <Pressable onPress={() => void loadCatalog()}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable>
+        </View>
+      )}
+      {data && !error && (
+        <FlatList
+          data={data.sculptures}
+          keyExtractor={(sculpture) => sculpture.id}
+          contentContainerStyle={styles.miniaturesList}
+          ListHeaderComponent={
+            <>
+              <View style={styles.miniaturesMapCard}>
+                <MiniaturesMap sculptures={data.sculptures} />
+              </View>
+              <View style={styles.miniaturesCountRow}>
+                <View style={styles.miniaturesCountPill}><Ionicons name="walk-outline" size={15} color={COLORS.navy} /><Text style={styles.miniaturesCountText}>{data.sculptures.length} локація</Text></View>
+                <Text style={styles.miniaturesSourceDate}>Джерело перевірено: {formatDateOnly(data.sourceCheckedAt)}</Text>
+              </View>
+              <View style={styles.miniaturesNotice}>
+                <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
+                <Text style={styles.miniaturesNoticeText}>{data.verificationNotice}</Text>
+              </View>
+              <Text style={styles.miniaturesListTitle}>У каталозі</Text>
+            </>
+          }
+          renderItem={({ item, index }) => <MiniatureCard sculpture={item} index={index + 1} />}
+          ListFooterComponent={<Text style={styles.miniaturesFooter}>Додаємо нові точки поступово — тільки з координатами, які можна перевірити.</Text>}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+function MiniatureCard({ sculpture, index }: { sculpture: MiniSculpture; index: number }) {
+  const installedAt = new Intl.DateTimeFormat("uk-UA", { year: "numeric" }).format(new Date(`${sculpture.installedAt}T12:00:00`));
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${sculpture.latitude},${sculpture.longitude}`;
+  return (
+    <View style={styles.miniatureCard}>
+      <View style={styles.miniatureCardTop}>
+        <View style={styles.miniatureNumber}><Text style={styles.miniatureNumberText}>{index}</Text></View>
+        <View style={styles.miniatureCardCopy}>
+          <Text style={styles.miniatureTitle}>{sculpture.title}</Text>
+          <Text style={styles.miniatureAddress}>{sculpture.address}</Text>
+        </View>
+      </View>
+      <Text style={styles.miniatureSummary}>{sculpture.summary}</Text>
+      <View style={styles.miniatureMeta}><Text style={styles.miniatureMetaText}>{sculpture.author}</Text><Text style={styles.miniatureMetaText}>· {installedAt}</Text></View>
+      <Pressable style={styles.miniatureMapAction} onPress={() => void openOfficialLink(mapsUrl)}>
+        <Ionicons name="navigate-outline" size={16} color={COLORS.navy} />
+        <Text style={styles.miniatureMapActionText}>Відкрити координати</Text>
+        <Ionicons name="open-outline" size={15} color={COLORS.navy} />
+      </Pressable>
+    </View>
+  );
+}
+
+function BottomNavigation({ activeTab, onChangeTab }: { activeTab: RootTab | null; onChangeTab: (tab: RootTab) => void }) {
   const items: Array<{ id: RootTab; icon: keyof typeof Ionicons.glyphMap; label: string }> = [
+    { id: "home", icon: "home-outline", label: "Головна" },
     { id: "services", icon: "grid-outline", label: "Сервіси" },
-    { id: "transport", icon: "bus-outline", label: "Транспорт" },
-    { id: "notifications", icon: "notifications-outline", label: "Повідомлення" },
+    { id: "feed", icon: "notifications-outline", label: "Стрічка" },
     { id: "profile", icon: "person-outline", label: "Профіль" },
   ];
   return <View style={styles.bottomNavigation}>{items.map((item) => (
@@ -771,6 +1304,7 @@ function AccessibilityBuildingsScreen({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<AccessibleBuildingList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const swipeBack = useSwipeBack(onBack);
 
   useEffect(() => {
     const timer = setTimeout(() => void loadBuildings(query), 250);
@@ -790,7 +1324,7 @@ function AccessibilityBuildingsScreen({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До міських сервісів" onPress={onBack} />
@@ -864,8 +1398,9 @@ function AccessibilityBuildingCard({ building }: { building: AccessibleBuilding 
 }
 
 function ParkingScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До міських сервісів" onPress={onBack} />
@@ -876,7 +1411,20 @@ function ParkingScreen({ onBack }: { onBack: () => void }) {
             <Text style={styles.eyebrow}>Офіційні міські сервіси</Text>
           </View>
           <Text style={styles.detailTitle}>Паркування в місті</Text>
-          <Text style={styles.detailDescription}>Довідка для водіїв і посилання лише на офіційні сервіси міської ради.</Text>
+          <Text style={styles.detailDescription}>Муніципальна довідка, правила стоянки та перевірені переходи до сервісів для водіїв.</Text>
+        </View>
+
+        <View style={styles.parkingHero}>
+          <View style={styles.parkingHeroTop}>
+            <View style={styles.parkingHeroIcon}><Ionicons name="car-outline" size={24} color="#f7be3d" /></View>
+            <View style={styles.parkingHeroBadge}><Text style={styles.parkingHeroBadgeText}>ОФІЦІЙНИЙ ДОВІДНИК</Text></View>
+          </View>
+          <Text style={styles.parkingHeroTitle}>Міський реєстр паркування</Text>
+          <Text style={styles.parkingHeroText}>Адреси майданчиків, операторів і тарифи з’являться тут після публікації міського набору даних.</Text>
+        </View>
+        <View style={styles.parkingSectionHeading}>
+          <Text style={styles.sectionLabel}>Дії для водіїв</Text>
+          <View style={styles.officialMark}><Ionicons name="shield-checkmark-outline" size={14} color={COLORS.green} /><Text style={styles.officialMarkText}>Офіційні сервіси</Text></View>
         </View>
 
         <Pressable style={styles.parkingActionCard} onPress={() => void openOfficialLink(PARKING_PORTAL_URL)}>
@@ -910,8 +1458,8 @@ function ParkingScreen({ onBack }: { onBack: () => void }) {
         </Pressable>
 
         <View style={styles.parkingUnavailable}>
-          <Text style={styles.parkingUnavailableTitle}>Майданчики та тарифи</Text>
-          <Text style={styles.parkingUnavailableText}>Поки не показуємо: міський набір даних про майданчики паркування проходить модерацію. Так ми не введемо водіїв в оману неактуальними адресами чи тарифами.</Text>
+          <Text style={styles.parkingUnavailableTitle}>Майданчики та тарифи готуються до публікації</Text>
+          <Text style={styles.parkingUnavailableText}>Офіційний набір містить майданчики та операторів, але його файл зараз на модерації. Додамо перелік і тарифи після відкритої публікації, щоб не показувати застарілі адреси чи суми.</Text>
           <Pressable onPress={() => void openOfficialLink(PARKING_DATASET_URL)}>
             <Text style={styles.parkingUnavailableLink}>Перевірити стан набору</Text>
           </Pressable>
@@ -922,9 +1470,9 @@ function ParkingScreen({ onBack }: { onBack: () => void }) {
 }
 
 function CityServiceDetails({ service, onBack }: { service: CityService; onBack: () => void }) {
-  const isSilence = service.id === "silence";
+  const swipeBack = useSwipeBack(onBack);
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До міських сервісів" onPress={onBack} />
@@ -934,9 +1482,8 @@ function CityServiceDetails({ service, onBack }: { service: CityService; onBack:
         </View>
         <Text style={styles.serviceDetailsTitle}>{service.title}</Text>
         <Text style={styles.serviceDetailsDescription}>{service.description}</Text>
-        {isSilence && <SilencePanel />}
         <View style={styles.serviceNotice}>
-          <Text style={styles.serviceNoticeTitle}>{isSilence ? "Як це працює" : "Важливо"}</Text>
+          <Text style={styles.serviceNoticeTitle}>Важливо</Text>
           <Text style={styles.serviceNoticeText}>{service.notice}</Text>
         </View>
         {service.sourceUrl && (
@@ -944,7 +1491,50 @@ function CityServiceDetails({ service, onBack }: { service: CityService; onBack:
             <Text style={styles.externalButtonText}>{service.sourceLabel} ↗</Text>
           </Pressable>
         )}
-        {!isSilence && <Text style={styles.externalHint}>Відкриється браузер. Вміст і подальші дії надає відповідний офіційний сайт.</Text>}
+        {!service.sourceUrl && <View style={styles.serviceComingSoon}>
+          <Ionicons name="construct-outline" size={20} color={COLORS.navy} />
+          <Text style={styles.serviceComingSoonText}>{service.sourceLabel}. Поки не підключатимемо неофіційні або вигадані дані.</Text>
+        </View>}
+        {service.sourceUrl && <Text style={styles.externalHint}>Відкриється браузер. Вміст і подальші дії надає відповідний офіційний сайт.</Text>}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function SilenceScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
+  return (
+    <SafeAreaView {...swipeBack} style={styles.screen}>
+      <StatusBar style="dark" />
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <ScrollView contentContainerStyle={styles.silenceContent}>
+        <View style={styles.detailIntro}>
+          <View style={styles.eyebrowRow}>
+            <View style={styles.eyebrowDot} />
+            <Text style={styles.eyebrow}>Загальнонаціональна пам’ять</Text>
+          </View>
+          <Text style={styles.detailTitle}>Хвилина мовчання</Text>
+          <Text style={styles.detailDescription}>Щоденне вшанування пам’яті загиблих захисників і захисниць України та цивільних громадян.</Text>
+        </View>
+        <View style={styles.silenceHero}>
+          <View style={styles.silenceHeroIcon}><Ionicons name="sunny-outline" size={30} color="#f7be3d" /></View>
+          <Text style={styles.silenceHeroKicker}>УЖГОРОД ПАМ’ЯТАЄ</Text>
+          <Text style={styles.silenceHeroTime}>09:00</Text>
+          <Text style={styles.silenceHeroText}>Щоденний загальноміський час пам’яті</Text>
+        </View>
+        <View style={styles.remembranceCard}>
+          <View style={styles.remembranceIcon}><Ionicons name="time-outline" size={21} color={COLORS.navy} /></View>
+          <View style={styles.remembranceCopy}>
+            <Text style={styles.remembranceTitle}>Заплануйте хвилину тиші</Text>
+            <Text style={styles.remembranceText}>Екран нагадує про час вшанування, але не надсилає push-сповіщень і не перериває роботу пристрою.</Text>
+          </View>
+        </View>
+        <SilencePanel />
+        <View style={styles.serviceNotice}>
+          <Text style={styles.serviceNoticeTitle}>Пам’ятаємо разом</Text>
+          <Text style={styles.serviceNoticeText}>Загальнонаціональну хвилину мовчання проводять щодня о 09:00 за київським часом.</Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1001,8 +1591,9 @@ async function openOfficialLink(url: string) {
 }
 
 function DataSourcesScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До транспорту" onPress={onBack} />
@@ -1024,10 +1615,44 @@ function DataSourcesScreen({ onBack }: { onBack: () => void }) {
         </View>
         <View style={styles.sourceCard}>
           <Text style={styles.sourceCardTitle}>Живі GPS-позиції</Text>
-          <Text style={styles.sourceText}>Поки не показуються: опублікований міський GPS-ресурс тимчасово має обмежений доступ.</Text>
+          <Text style={styles.sourceText}>Показуємо на карті маршруту з публічного DozoR. Дані можуть надходити із короткою затримкою.</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TransportEmptyState({
+  hasQuery,
+  onReset,
+  onShowStops,
+}: {
+  hasQuery: boolean;
+  onReset: () => void;
+  onShowStops: () => void;
+}) {
+  return (
+    <View style={styles.transportEmptyState}>
+      <View style={styles.transportEmptyIcon}>
+        <Ionicons name={hasQuery ? "search-outline" : "cloud-download-outline"} size={25} color={COLORS.navy} />
+      </View>
+      <Text style={styles.transportEmptyTitle}>{hasQuery ? "За цим запитом нічого не знайдено" : "Дані ще не завантажені"}</Text>
+      <Text style={styles.transportEmptyText}>
+        {hasQuery
+          ? "Перевірте написання назви або перегляньте інший тип пошуку."
+          : "Офіційний перелік маршрутів і зупинок з’явиться після імпорту GTFS на сервері."}
+      </Text>
+      <View style={styles.transportEmptyActions}>
+        {hasQuery && (
+          <Pressable style={styles.transportEmptyPrimaryAction} onPress={onReset}>
+            <Text style={styles.transportEmptyPrimaryActionText}>Скинути пошук</Text>
+          </Pressable>
+        )}
+        <Pressable style={styles.transportEmptySecondaryAction} onPress={onShowStops}>
+          <Text style={styles.transportEmptySecondaryActionText}>{hasQuery ? "Змінити пошук" : "Переглянути інший список"}</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -1040,8 +1665,9 @@ function StopDetails({
   onBack: () => void;
   onOpenRoute: (route: TransportRoute) => void;
 }) {
+  const swipeBack = useSwipeBack(onBack);
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До зупинок" onPress={onBack} />
@@ -1076,60 +1702,179 @@ function RouteDetails({
   map: TransportRouteMap | null;
   onBack: () => void;
   onSelectStop: (stop: TransportStop) => void;
-  onOpenMap: () => void;
+  onOpenMap: (variantId?: string) => void;
 }) {
+  const termini = getRouteTermini(route);
+  const variants = route.variants.filter((variant) => variant.stops.length > 0);
+  const [directionIndex, setDirectionIndex] = useState(0);
+  const direction = variants[directionIndex] ?? variants[0];
+  const destination = direction?.stops[direction.stops.length - 1]?.name;
+  const swipeBack = useSwipeBack(onBack);
+
+  useEffect(() => {
+    setDirectionIndex(0);
+  }, [route.id]);
+
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="Усі маршрути" onPress={onBack} />
-      <View style={styles.routeHeader}>
-        <View style={styles.routeBadge}>
-          <Text style={styles.routeBadgeText}>{route.routeNumber}</Text>
-        </View>
-        <Text style={styles.routeName}>{route.name}</Text>
-      </View>
-      {map && (
-        <Pressable style={styles.routeMapPreview} onPress={onOpenMap}>
-          <MapView pointerEvents="none" style={styles.routeMapPreviewMap} initialRegion={getInitialRegion(map)}>
-            {map.variants.map((variant, index) => (
-              <Polyline
-                key={variant.id}
-                coordinates={variant.shape}
-                strokeColor={MAP_COLORS[index % MAP_COLORS.length]}
-                strokeWidth={4}
-              />
-            ))}
-          </MapView>
-          <View style={styles.routeMapPreviewLabel}>
-            <Text style={styles.routeMapPreviewLabelText}>Схема маршруту · розгорнути</Text>
+      <ScrollView contentContainerStyle={styles.routeDetailsContent}>
+        <CivicHeader />
+        <BackLink label="Усі маршрути" onPress={onBack} />
+        <View style={styles.routeDetailHero}>
+          <View style={styles.routeDetailTopLine}>
+            <View style={styles.routeDetailRouteIdentity}>
+              <Text style={styles.routeDetailRouteLabel}>МАРШРУТ</Text>
+              <View style={styles.routeDetailRouteBadge}>
+                <Text style={styles.routeDetailRouteNumber}>{route.routeNumber}</Text>
+              </View>
+            </View>
+            <View style={styles.routeDetailPlanMark}>
+              <Ionicons name="calendar-outline" size={14} color={COLORS.gold} />
+              <Text style={styles.routeDetailPlanMarkText}>ПЛАНОВИЙ РОЗКЛАД</Text>
+            </View>
           </View>
+          <Text style={styles.routeDetailTitle}>{route.name}</Text>
+          {termini && <Text style={styles.routeDetailTermini}>{termini}</Text>}
+          <View style={styles.routeDetailSource}>
+            <Ionicons name="checkmark-circle-outline" size={16} color="#d3e4ff" />
+            <Text style={styles.routeDetailSourceText}>Маршрут і зупинки з офіційного набору GTFS</Text>
+          </View>
+        </View>
+        {map && (
+          <Pressable style={styles.routeMapPreview} onPress={() => onOpenMap(direction?.id)}>
+            <RouteMap
+              activeVariantId={direction?.id}
+              map={map}
+              region={getInitialRegion(map, direction?.stops, direction?.id)}
+              stops={direction?.stops}
+              preview
+            />
+            <View style={styles.routeMapPreviewLabel}>
+              <Text style={styles.routeMapPreviewLabelText}>Карта маршруту · розгорнути</Text>
+            </View>
+          </Pressable>
+        )}
+        <Pressable style={styles.mapButton} onPress={() => onOpenMap(direction?.id)}>
+          <Ionicons name="map-outline" size={18} color={COLORS.navy} />
+          <Text style={styles.mapButtonText}>{map ? "Відкрити карту маршруту" : "Показати маршрут на карті"}</Text>
+          <Ionicons name="chevron-forward" size={16} color={COLORS.navy} />
         </Pressable>
-      )}
-      <Pressable style={styles.mapButton} onPress={onOpenMap}>
-        <Text style={styles.mapButtonText}>{map ? "Відкрити карту маршруту" : "Показати маршрут на карті"}</Text>
-      </Pressable>
-      <Text style={styles.hint}>Натисніть зупинку, щоб переглянути плановий розклад на сьогодні.</Text>
-      <ScrollView contentContainerStyle={styles.detailsList}>
-        {route.variants.map((variant) => (
-          <View key={variant.id} style={styles.variant}>
-            <Text style={styles.variantTitle}>{variant.name || "Напрямок руху"}</Text>
-            {variant.stops.map((stop, index) => (
+        <View style={styles.stopsIntro}>
+          <View>
+            <Text style={styles.stopsHeading}>Зупинки на лінії</Text>
+            <Text style={styles.hint}>Оберіть зупинку, щоб переглянути планові відправлення.</Text>
+          </View>
+          <View style={styles.stopsCountPill}>
+            <Text style={styles.stopsCountText}>{direction?.stops.length ?? 0}</Text>
+          </View>
+        </View>
+        {direction ? <>
+          <View style={styles.directionSwitch}>
+            <View style={styles.directionCopy}>
+              <Text style={styles.directionLabel}>Кінцева зупинка</Text>
+              <Text numberOfLines={1} style={styles.directionTitle}>{destination || direction.name || "Напрямок руху"}</Text>
+            </View>
+            {variants.length > 1 ? <Pressable
+              accessibilityLabel="Змінити напрямок маршруту"
+              style={styles.directionSwitchButton}
+              onPress={() => setDirectionIndex((index) => (index + 1) % variants.length)}
+            >
+              <Ionicons name="swap-horizontal-outline" size={21} color={COLORS.navy} />
+            </Pressable> : null}
+          </View>
+          <View style={styles.variant}>
+            {direction.stops.map((stop, index) => (
               <Pressable key={stop.id} style={styles.stopRow} onPress={() => onSelectStop(stop)}>
-                <Text style={styles.stopNumber}>{index + 1}</Text>
+                <View style={styles.stopSequence}>
+                  <View style={[styles.stopDot, index === 0 && styles.stopDotStart, index === direction.stops.length - 1 && styles.stopDotEnd]} />
+                  {index < direction.stops.length - 1 && <View style={styles.stopLine} />}
+                </View>
                 <Text style={styles.stopName}>{stop.name}</Text>
-                <Text style={styles.stopSchedule}>Розклад</Text>
+                <View style={styles.stopScheduleLink}>
+                  <Text style={styles.stopSchedule}>Розклад</Text>
+                  <Ionicons name="chevron-forward" size={14} color={COLORS.navy} />
+                </View>
               </Pressable>
             ))}
           </View>
-        ))}
+        </> : <View style={styles.variant}><Text style={styles.hint}>Для цього маршруту поки немає списку зупинок.</Text></View>}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: () => void }) {
-  const region = getInitialRegion(mapScreen.map);
+  const variants = mapScreen.route.variants.filter((variant) => variant.stops.length > 0);
+  const defaultDirectionIndex = Math.max(0, variants.findIndex((variant) => variant.id === mapScreen.activeVariantId));
+  const [directionIndex, setDirectionIndex] = useState(defaultDirectionIndex);
+  const [selectedStop, setSelectedStop] = useState<TransportStop | null>(null);
+  const [departures, setDepartures] = useState<TransportDeparture[] | null>(null);
+  const [departureError, setDepartureError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [vehiclePositions, setVehiclePositions] = useState<TransportVehiclePositions | null>(null);
+  const direction = variants[directionIndex] ?? variants[0];
+  const destination = direction?.stops[direction.stops.length - 1]?.name;
+  const region = getInitialRegion(mapScreen.map, direction?.stops, direction?.id);
+
+  useEffect(() => {
+    setDirectionIndex(defaultDirectionIndex);
+    setSelectedStop(null);
+    setDepartures(null);
+    setDepartureError(null);
+  }, [defaultDirectionIndex, mapScreen.route.id]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadVehiclePositions = async () => {
+      try {
+        const positions = await getVehiclePositions(mapScreen.route.routeNumber);
+        if (active) {
+          setVehiclePositions(positions);
+        }
+      } catch {
+        if (active) {
+          setVehiclePositions({ available: false, stale: false, fetchedAt: new Date().toISOString(), vehicles: [] });
+        }
+      }
+    };
+    void loadVehiclePositions();
+    const timer = setInterval(() => void loadVehiclePositions(), 20_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [mapScreen.route.routeNumber]);
+
+  function changeDirection() {
+    if (variants.length < 2) {
+      return;
+    }
+    setDirectionIndex((index) => (index + 1) % variants.length);
+    setSelectedStop(null);
+    setDepartures(null);
+    setDepartureError(null);
+  }
+
+  async function selectStop(stop: TransportStop) {
+    setSelectedStop(stop);
+    setDepartures(null);
+    setDepartureError(null);
+    try {
+      const allDepartures = await getDepartures(mapScreen.route.id, stop.id, localDate());
+      setDepartures(direction ? allDepartures.filter((departure) => departure.routeVariantId === direction.id) : allDepartures);
+    } catch (requestError) {
+      setDepartureError(requestError instanceof Error ? requestError.message : "Не вдалося отримати плановий розклад.");
+    }
+  }
+
+  const nextDepartures = departures ? findUpcomingDepartures(departures, now) : [];
+
   return (
     <SafeAreaView style={styles.mapScreen}>
       <StatusBar style="dark" />
@@ -1138,35 +1883,81 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           <Text style={styles.back}>← До маршруту {mapScreen.route.routeNumber}</Text>
         </Pressable>
         <Text style={styles.mapTitle}>{mapScreen.route.name}</Text>
-        <Text style={styles.mapHint}>Лінії — напрямки руху, точки — зупинки</Text>
+        <Text style={styles.mapHint}>Оберіть зупинку, щоб побачити її плановий час.</Text>
       </View>
-      <MapView style={styles.map} initialRegion={region}>
-        {mapScreen.map.variants.map((variant, index) => (
-          <Polyline
-            key={variant.id}
-            coordinates={variant.shape}
-            strokeColor={MAP_COLORS[index % MAP_COLORS.length]}
-            strokeWidth={5}
-          />
-        ))}
-        {mapScreen.map.stops.map((stop) => (
-          <Marker
-            key={stop.id}
-            coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
-            title={stop.name}
-            description="Зупинка громадського транспорту"
-            pinColor="#123a63"
-          />
-        ))}
-      </MapView>
+      {direction ? <View style={styles.mapDirectionSwitch}>
+        <View style={styles.mapDirectionCopy}>
+          <Text style={styles.mapDirectionLabel}>Напрямок · кінцева</Text>
+          <Text numberOfLines={1} style={styles.mapDirectionTitle}>{destination || direction.name || "Напрямок руху"}</Text>
+        </View>
+        {variants.length > 1 ? <Pressable
+          accessibilityLabel="Змінити напрямок на карті"
+          style={styles.mapDirectionButton}
+          onPress={changeDirection}
+        >
+          <Ionicons name="swap-horizontal-outline" size={21} color={COLORS.navy} />
+        </Pressable> : null}
+      </View> : null}
+      <View style={styles.mapCanvas}>
+        <RouteMap
+          activeVariantId={direction?.id}
+          map={mapScreen.map}
+          region={region}
+          selectedStopId={selectedStop?.id}
+          stops={direction?.stops}
+          vehicles={vehiclePositions?.vehicles}
+          onStopPress={(stop) => void selectStop(stop)}
+        />
+        {vehiclePositions ? <View style={styles.mapGpsStatus}>
+          <View style={[styles.mapGpsDot, vehiclePositions.available ? (vehiclePositions.stale ? styles.mapGpsDotStale : styles.mapGpsDotLive) : styles.mapGpsDotOffline]} />
+          <Text style={styles.mapGpsStatusText}>
+            {vehiclePositions.available
+              ? (vehiclePositions.stale
+                ? "GPS тимчасово без оновлення"
+                : `Онлайн GPS · ${vehiclePositions.vehicles.length} ${pluralizeBus(vehiclePositions.vehicles.length)}`)
+              : "Онлайн GPS зараз недоступний"}
+          </Text>
+        </View> : null}
+        {selectedStop ? <View style={[styles.mapStopCard, vehiclePositions && styles.mapStopCardWithGps]}>
+          <View style={styles.mapStopCardTop}>
+            <View style={styles.mapStopIcon}><Ionicons name="bus-outline" size={18} color={COLORS.navy} /></View>
+            <View style={styles.mapStopCopy}>
+              <Text numberOfLines={2} style={styles.mapStopName}>{selectedStop.name}</Text>
+              <Text numberOfLines={1} style={styles.mapStopDirection}>До {destination || direction?.name || "кінцевої"}</Text>
+            </View>
+          </View>
+          {departures === null && !departureError ? <View style={styles.mapStopScheduleLoading}>
+            <ActivityIndicator size="small" color={COLORS.navy} />
+            <Text style={styles.mapStopScheduleText}>Шукаємо плановий час…</Text>
+          </View> : null}
+          {nextDepartures.length > 0 ? <View style={styles.mapStopSchedule}>
+            <Text style={styles.mapStopScheduleLabel}>Найближчі за розкладом</Text>
+            <View style={styles.mapStopTimes}>
+              {nextDepartures.map((departure) => {
+                const minutesUntil = minutesUntilDeparture(departure, now);
+                return <View key={`${departure.routeVariantId}-${departure.departureTimeSeconds}`} style={styles.mapStopTimePill}>
+                  <Text style={styles.mapStopScheduleTime}>{departure.departureTime}</Text>
+                  <Text style={styles.mapStopMinutesText}>{minutesUntil === 0 ? "зараз" : `через ${minutesUntil} хв`}</Text>
+                </View>;
+              })}
+            </View>
+          </View> : null}
+          {departures !== null && nextDepartures.length === 0 && !departureError ? <Text style={styles.mapStopEmpty}>Сьогодні в цьому напрямку планових рейсів більше немає.</Text> : null}
+          {departureError ? <Text style={styles.mapStopError}>Плановий час зараз недоступний. Спробуйте ще раз.</Text> : null}
+          <Text style={styles.mapStopFootnote}>
+            Час із затвердженого розкладу{vehiclePositions?.available ? "; живі автобуси позначено на карті." : "."}
+          </Text>
+        </View> : null}
+      </View>
     </SafeAreaView>
   );
 }
 
-const MAP_COLORS = ["#123a63", "#e5ae2d", "#3d6836", "#9f1239"];
-
-function getInitialRegion(map: TransportRouteMap): Region {
-  const points = [...map.stops, ...map.variants.flatMap((variant) => variant.shape)];
+function getInitialRegion(map: TransportRouteMap, stops = map.stops, activeVariantId?: string): MapRegion {
+  const shapes = activeVariantId
+    ? map.variants.filter((variant) => variant.id === activeVariantId).flatMap((variant) => variant.shape)
+    : map.variants.flatMap((variant) => variant.shape);
+  const points = [...stops, ...shapes];
   if (points.length === 0) {
     return { latitude: 48.6208, longitude: 22.2879, latitudeDelta: 0.08, longitudeDelta: 0.08 };
   }
@@ -1184,6 +1975,18 @@ function getInitialRegion(map: TransportRouteMap): Region {
   };
 }
 
+function pluralizeBus(count: number): string {
+  const remainder = count % 10;
+  const tens = count % 100;
+  if (remainder === 1 && tens !== 11) {
+    return "автобус";
+  }
+  if (remainder >= 2 && remainder <= 4 && (tens < 12 || tens > 14)) {
+    return "автобуси";
+  }
+  return "автобусів";
+}
+
 function ScheduleDetails({
   schedule,
   onBack,
@@ -1193,10 +1996,11 @@ function ScheduleDetails({
   onBack: () => void;
   onChangeDate: (date: string) => void;
 }) {
+  const swipeBack = useSwipeBack(onBack);
   const readableDate = new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long" })
     .format(new Date(`${schedule.date}T12:00:00`));
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label={`До зупинок маршруту ${schedule.route.routeNumber}`} onPress={onBack} />
@@ -1243,8 +2047,66 @@ function addDays(date: string, amount: number) {
   return `${value.getFullYear()}-${month}-${day}`;
 }
 
+function findUpcomingDepartures(departures: TransportDeparture[], now: Date) {
+  const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  return departures.filter((departure) => departure.departureTimeSeconds >= currentSeconds).slice(0, 3);
+}
+
+function minutesUntilDeparture(departure: TransportDeparture, now: Date) {
+  const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  return Math.max(0, Math.ceil((departure.departureTimeSeconds - currentSeconds) / 60));
+}
+
 function formatUpdatedAt(value: string) {
   return new Intl.DateTimeFormat("uk-UA", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatDateOnly(value: string) {
+  return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
+}
+
+function formatDashboardDate() {
+  return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long" }).format(new Date());
+}
+
+function formatDashboardDay() {
+  const day = new Intl.DateTimeFormat("uk-UA", { weekday: "long" }).format(new Date());
+  return day.charAt(0).toUpperCase() + day.slice(1);
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value);
+}
+
+function airQualityLabel(index: number) {
+  const labels: Record<number, string> = {
+    1: "Добре",
+    2: "Помірно",
+    3: "Для чутливих груп",
+    4: "Незадовільно",
+    5: "Погано",
+    6: "Небезпечно",
+  };
+  return labels[index] ?? "Немає оцінки";
+}
+
+function formatWeatherDay(date: string, index: number) {
+  if (index === 0) {
+    return "Сьогодні";
+  }
+  if (index === 1) {
+    return "Завтра";
+  }
+  return new Intl.DateTimeFormat("uk-UA", { weekday: "short", day: "numeric" }).format(new Date(`${date}T12:00:00`));
+}
+
+function formatWeatherHour(value: string) {
+  return new Intl.DateTimeFormat("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }).format(new Date(value));
+}
+
+function sortRoutesByNumber(routes: TransportRoute[]) {
+  const collator = new Intl.Collator("uk-UA", { numeric: true, sensitivity: "base" });
+  return [...routes].sort((left, right) => collator.compare(left.routeNumber, right.routeNumber));
 }
 
 function LoadingScreen() {
@@ -1256,6 +2118,16 @@ function LoadingScreen() {
       <Text style={styles.loadingText}>Отримуємо офіційні маршрути та зупинки.</Text>
     </SafeAreaView>
   );
+}
+
+function getRouteTermini(route: TransportRouteDetails) {
+  const firstVariant = route.variants.find((variant) => variant.stops.length > 1);
+  if (!firstVariant) {
+    return null;
+  }
+  const first = firstVariant.stops[0]?.name;
+  const last = firstVariant.stops[firstVariant.stops.length - 1]?.name;
+  return first && last ? `${first}  ⇄  ${last}` : null;
 }
 
 function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -1274,16 +2146,25 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.mist, paddingHorizontal: 16 },
+  screen: { flex: 1, backgroundColor: "#f6f7fb", paddingHorizontal: 16 },
+  transportScreen: { flex: 1, backgroundColor: "#f6f7fb" },
+  transportContent: { paddingHorizontal: 20 },
   centered: { alignItems: "center", justifyContent: "center" },
-  civicHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 64, paddingTop: 6 },
-  brandGroup: { alignItems: "center", flexDirection: "row", gap: 9 },
-  brandMark: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 38, justifyContent: "center", width: 38 },
+  civicHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 58, paddingTop: 4 },
+  brandGroup: { alignItems: "center", flexDirection: "row", gap: 8 },
+  brandMark: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, height: 34, justifyContent: "center", width: 34 },
+  brandMarkText: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 16 },
+  brandMarkAccent: { backgroundColor: COLORS.gold, bottom: 5, position: "absolute", right: 5 },
+  brandIntroScreen: { alignItems: "center", backgroundColor: "#f6f7fb", flex: 1, justifyContent: "center", paddingHorizontal: 20 },
+  brandIntroContent: { alignItems: "center", marginTop: -38 },
+  brandIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, letterSpacing: -0.5, marginTop: 19 },
+  brandIntroSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 13, marginTop: 6 },
+  brandIntroFooter: { alignItems: "center", bottom: 42, flexDirection: "row", gap: 8, position: "absolute" },
+  brandIntroFooterText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
   brandTitleRow: { alignItems: "center", flexDirection: "row", gap: 6 },
   brandTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17, lineHeight: 20 },
-  brandCountry: { backgroundColor: "#dfe9f8", borderRadius: 6, color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 10, overflow: "hidden", paddingHorizontal: 5, paddingVertical: 2 },
   brandSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 1 },
-  headerProfileIcon: { alignItems: "center", backgroundColor: COLORS.navyDark, borderRadius: 18, height: 34, justifyContent: "center", width: 34 },
+  headerDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
   backLink: { alignItems: "center", flexDirection: "row", gap: 2, marginTop: 5, minHeight: 32 },
   backLinkText: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 13 },
   pageIntro: { marginTop: 15 },
@@ -1293,15 +2174,15 @@ const styles = StyleSheet.create({
   eyebrow: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase" },
   pageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 26, letterSpacing: -0.4, lineHeight: 32, marginTop: 7 },
   pageDescription: { color: "#43474e", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
-  transportHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 20, overflow: "hidden", padding: 17 },
+  transportHero: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 18, overflow: "hidden", padding: 15 },
   transportHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  transportHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 9, height: 40, justifyContent: "center", width: 40 },
-  transportHeroBadge: { backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(229,174,45,0.35)", borderRadius: 5, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4 },
-  transportHeroBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.6 },
-  transportHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, lineHeight: 25, marginTop: 17 },
-  transportHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
-  transportHeroButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", justifyContent: "space-between", marginTop: 18, minHeight: 48, paddingHorizontal: 14 },
-  transportHeroButtonText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
+  transportHeroIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
+  transportHeroBadge: { backgroundColor: COLORS.blueSurface, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
+  transportHeroBadgeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.5 },
+  transportHeroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, lineHeight: 24, marginTop: 14 },
+  transportHeroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  transportHeroButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 6, marginTop: 14 },
+  transportHeroButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
   riverNote: { alignItems: "center", backgroundColor: "#e7eeff", borderRadius: 14, flexDirection: "row", gap: 11, marginTop: 14, padding: 12 },
   riverNoteIcon: { alignItems: "center", backgroundColor: "#d3e4ff", borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
   riverNoteText: { flex: 1 },
@@ -1309,20 +2190,33 @@ const styles = StyleSheet.create({
   riverNoteTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
   riverNoteDescription: { color: "#43474e", fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
   sectionHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 24 },
+  serviceCategoryFirst: { marginTop: 25 },
+  serviceCategory: { marginTop: 28 },
+  serviceGroupHeading: { marginBottom: 10 },
+  serviceGroupTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17 },
+  serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
+  serviceGridCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, justifyContent: "space-between", minHeight: 122, padding: 13, width: "48.4%" },
+  serviceGridIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  serviceGridFooter: { alignItems: "flex-end", flexDirection: "row", gap: 4, justifyContent: "space-between", marginTop: 14 },
+  serviceGridTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
   officialMark: { alignItems: "center", flexDirection: "row", gap: 4 },
   officialMarkText: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
-  serviceRow: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 9, minHeight: 82, padding: 12 },
-  serviceRowIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 40, justifyContent: "center", width: 40 },
+  serviceRow: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 8, minHeight: 74, padding: 12 },
+  serviceRowIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
   serviceRowText: { flex: 1 },
   serviceRowTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 20 },
   serviceRowDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
   serviceGoldDot: { backgroundColor: COLORS.gold, borderRadius: 4, height: 7, width: 7 },
+  servicesCount: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
   openDataRow: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 9, minHeight: 82, padding: 12 },
   hubFooter: { alignItems: "center", gap: 7, marginHorizontal: 14, marginTop: 27, paddingBottom: 20 },
-  profileIntroCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 14, marginTop: 18, padding: 16 },
-  profileIntroIcon: { alignItems: "center", backgroundColor: "#e4efff", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
-  profileIntroText: { flex: 1 },
-  profileIntroDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 18, marginTop: 4 },
+  profileAppCard: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 17, flexDirection: "row", gap: 12, marginTop: 18, overflow: "hidden", padding: 15 },
+  profileAppMark: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 14, height: 58, justifyContent: "center", width: 58 },
+  profileAppCopy: { flex: 1 },
+  profileAppTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 16 },
+  profileAppText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 4 },
+  profileVersionPill: { alignSelf: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 6, marginTop: 8, paddingHorizontal: 6, paddingVertical: 3 },
+  profileVersionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10 },
   profileSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 26 },
   profileGroup: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 10, overflow: "hidden" },
   profileRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 67, paddingHorizontal: 13 },
@@ -1332,25 +2226,149 @@ const styles = StyleSheet.create({
   profileRowValue: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 2 },
   profilePrivacyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 10, marginTop: 24, padding: 14 },
   profilePrivacyText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
-  officialNewsButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, flexDirection: "row", gap: 9, justifyContent: "center", marginTop: 18, minHeight: 50 },
-  officialNewsButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 14 },
-  newsDatasetFooter: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 9 },
-  sourceTransparencyCard: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 10, marginTop: 20, padding: 14 },
-  sourceTransparencyText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
-  transportPageTitleRow: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
+  profileNoticeCard: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 10, padding: 14 },
+  profileNoticeCopy: { flex: 1 },
+  profileNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
+  profileNoticeText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 4 },
+  profileFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 22, textAlign: "center" },
+  newsSourceLine: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, marginTop: 16, paddingVertical: 5 },
+  newsSourceLineText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  newsListHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
+  newsListHeadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19 },
+  newsListHeadingMeta: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
+  newsArticleCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 14 },
+  newsArticleTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  newsArticleIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
+  newsArticleDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  newsArticleTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 21, marginTop: 12 },
+  newsArticleAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 6, marginTop: 12 },
+  newsArticleActionText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  newsMoreLink: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: 6, marginTop: 18, paddingVertical: 7 },
+  newsMoreLinkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  transportPageTitleRow: { alignItems: "flex-start", flexDirection: "row", gap: 10, justifyContent: "space-between", marginTop: 4 },
+  transportPageTitleCopy: { flex: 1 },
   transportPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 22, lineHeight: 28 },
   transportPageDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3, maxWidth: 235 },
-  transportPlanMark: { alignItems: "center", backgroundColor: "#e8f7e4", borderRadius: 12, flexDirection: "row", gap: 5, marginTop: 3, paddingHorizontal: 8, paddingVertical: 5 },
-  transportPlanMarkText: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 10 },
+  transportPlanMark: { alignItems: "center", backgroundColor: "#fff8e9", borderRadius: 12, flexDirection: "row", gap: 5, marginTop: 3, paddingHorizontal: 8, paddingVertical: 5 },
+  transportPlanMarkAvailable: { backgroundColor: "#e8f7e4" },
+  transportPlanMarkText: { color: "#795000", fontFamily: FONTS.medium, fontSize: 10 },
+  transportPlanMarkTextAvailable: { color: COLORS.green },
   transportSourceLine: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 10, flexDirection: "row", gap: 8, marginTop: 15, padding: 11 },
-  transportSourceText: { color: "#485768", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17 },
+  transportSourceCopy: { flex: 1 },
+  transportSourceTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 12 },
+  transportSourceText: { color: "#485768", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  transportUpdatedAt: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 6 },
   dataSourcesInlineLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, marginTop: 8 },
   dataSourcesInlineLinkText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
   searchBox: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 14, minHeight: 48, paddingHorizontal: 12 },
   title: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 20 },
-  hubContent: { flexGrow: 1, paddingBottom: 22 },
+  hubContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20 },
   homeContent: { flexGrow: 1, paddingBottom: 28 },
-  simpleTabContent: { flexGrow: 1, paddingBottom: 28, paddingTop: 0 },
+  dashboardContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20 },
+  dashboardTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 18 },
+  dashboardDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
+  dashboardDay: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 3 },
+  dashboardCityChip: { alignItems: "center", backgroundColor: "transparent", flexDirection: "row", gap: 4, paddingHorizontal: 2, paddingVertical: 7 },
+  dashboardCityText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
+  dashboardStatusGrid: { flexDirection: "row", gap: 10, marginTop: 17 },
+  dashboardStatusCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, flex: 1, minHeight: 118, padding: 14 },
+  dashboardTransportCard: { backgroundColor: COLORS.blueSurface, borderColor: "#d3e4ff" },
+  dashboardStatusTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 14 },
+  dashboardStatusText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  weatherPreviewIcon: { height: 34, marginLeft: -6, marginTop: -5, width: 34 },
+  cityWeatherIcon: { height: 30, width: 30 },
+  weatherPreviewTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, marginTop: 2 },
+  weatherFeatureCard: { alignItems: "stretch", backgroundColor: "#eaf2ff", borderColor: "#d4e3f7", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 17, minHeight: 128, overflow: "hidden", padding: 14 },
+  weatherFeatureMain: { flex: 1, justifyContent: "space-between" },
+  weatherFeatureLabel: { color: "#526d89", fontFamily: FONTS.medium, fontSize: 11 },
+  weatherFeatureTemperatureRow: { alignItems: "center", flexDirection: "row", gap: 4, marginTop: -2 },
+  weatherFeatureTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 45, letterSpacing: -2, lineHeight: 53 },
+  weatherFeatureIcon: { height: 55, width: 55 },
+  weatherFeatureCondition: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 13, marginTop: -5 },
+  weatherFeatureAir: { alignItems: "flex-start", backgroundColor: "rgba(255,255,255,0.78)", borderRadius: 13, justifyContent: "center", paddingHorizontal: 11, paddingVertical: 10, width: 118 },
+  weatherFeatureAirLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 7 },
+  weatherFeatureAirValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
+  weatherFeatureAirMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 2 },
+  weatherFeatureChevron: { position: "absolute", right: 8, top: 8 },
+  airAlertBanner: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 9, paddingHorizontal: 11, paddingVertical: 9 },
+  airAlertBannerClear: { backgroundColor: "#eef8eb" },
+  airAlertBannerActive: { backgroundColor: "#fff4f3", borderColor: "#f0b5b0", borderWidth: 1 },
+  airAlertIcon: { alignItems: "center", borderRadius: 9, height: 34, justifyContent: "center", width: 34 },
+  airAlertIconClear: { backgroundColor: "#dff1da" },
+  airAlertIconActive: { backgroundColor: "#ffe3e0" },
+  airAlertCopy: { flex: 1 },
+  airAlertTitle: { color: COLORS.green, fontFamily: FONTS.semibold, fontSize: 12 },
+  airAlertTitleActive: { color: "#8e1b1b" },
+  airAlertTextActive: { color: "#a54943" },
+  currencyWidget: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 14 },
+  currencyWidgetHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  currencyWidgetTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
+  currencyWidgetTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
+  currencyWidgetSource: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  currencyRatesRow: { flexDirection: "row", gap: 9, marginTop: 13 },
+  currencyRate: { backgroundColor: "#f6f8fd", borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 8 },
+  currencyCode: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
+  currencyValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  currencyMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 1 },
+  currencyUnavailable: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 13 },
+  currencyStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 10, marginTop: 8 },
+  weatherContent: { paddingBottom: 32, paddingHorizontal: 20 },
+  weatherHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 18, padding: 18 },
+  weatherHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  weatherHeroTemperature: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 52, letterSpacing: -2 },
+  weatherHeroCondition: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 14, marginTop: 2 },
+  weatherHeroIcon: { height: 78, width: 78 },
+  weatherMetrics: { borderTopColor: "rgba(255,255,255,0.18)", borderTopWidth: 1, flexDirection: "row", gap: 8, marginTop: 16, paddingTop: 13 },
+  weatherMetric: { flex: 1 },
+  weatherMetricLabel: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 10, marginTop: 5 },
+  weatherMetricValue: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 12, marginTop: 2 },
+  weatherAirQualityCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", marginTop: 12, padding: 13 },
+  weatherAirQualityIcon: { alignItems: "center", backgroundColor: "#eef7eb", borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
+  weatherAirQualityCopy: { flex: 1, marginLeft: 10 },
+  weatherAirQualityLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  weatherAirQualityValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  weatherAirQualityMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, lineHeight: 15, textAlign: "right" },
+  weatherDayTabs: { gap: 8, paddingTop: 18 },
+  weatherDayTab: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, minWidth: 112, paddingHorizontal: 12, paddingVertical: 10 },
+  weatherDayTabActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
+  weatherDayTabText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 12 },
+  weatherDayTabTextActive: { color: "#ffffff" },
+  weatherDayTabTemperature: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 4 },
+  weatherDaySummary: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 14, padding: 14 },
+  weatherDaySummaryTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
+  weatherDaySummaryText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 4 },
+  weatherSunTimes: { gap: 4 },
+  weatherSunTime: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  weatherSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 22 },
+  weatherHours: { gap: 8, paddingTop: 10 },
+  weatherHourCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 12, borderWidth: 1, minWidth: 70, paddingHorizontal: 9, paddingVertical: 10 },
+  weatherHourTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
+  weatherHourIcon: { height: 32, marginVertical: 4, width: 32 },
+  weatherHourTemperature: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
+  weatherHourRain: { color: COLORS.navy, fontFamily: FONTS.regular, fontSize: 10, marginTop: 3 },
+  weatherSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 22, textAlign: "center" },
+  weatherStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 11, marginTop: 5, textAlign: "center" },
+  dashboardSectionRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 26 },
+  dashboardSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 18 },
+  dashboardAllLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  dashboardFeedCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 9, padding: 13 },
+  dashboardFeedIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  dashboardFeedCopy: { flex: 1 },
+  dashboardFeedTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
+  dashboardFeedText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  homeNewsList: { marginTop: 4 },
+  homeNewsItem: { alignItems: "center", borderBottomColor: "#dce2ea", borderBottomWidth: 1, flexDirection: "row", gap: 10, paddingVertical: 13 },
+  homeNewsIcon: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, height: 36, justifyContent: "center", width: 36 },
+  homeNewsCopy: { flex: 1 },
+  homeNewsTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
+  homeNewsMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
+  homeNewsAllButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
+  homeNewsAllText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  dashboardServicesRow: { gap: 10, paddingTop: 10, paddingRight: 4 },
+  dashboardServiceCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, height: 112, justifyContent: "space-between", padding: 12, width: 116 },
+  dashboardServiceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 38, justifyContent: "center", width: 38 },
+  dashboardServiceTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 12, lineHeight: 16 },
+  simpleTabContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20, paddingTop: 0 },
   cityKicker: { color: "#43474e", fontSize: 12, fontWeight: "700", letterSpacing: 1.1, marginTop: 20 },
   homeTitle: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 6 },
   homeIntro: { color: "#43474e", fontSize: 16, lineHeight: 23, marginTop: 8 },
@@ -1392,7 +2410,7 @@ const styles = StyleSheet.create({
   serviceAction: { color: "#123a63", fontSize: 14, fontWeight: "700", marginTop: 10 },
   hubFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   detailIntro: { marginTop: 13 },
-  serviceDetailsContent: { alignItems: "stretch", paddingBottom: 32, paddingTop: 16 },
+  serviceDetailsContent: { alignItems: "stretch", paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
   serviceDetailsIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 16, height: 58, justifyContent: "center", width: 58 },
   serviceDetailsIconText: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 30 },
   detailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, letterSpacing: -0.3, lineHeight: 31, marginTop: 7 },
@@ -1402,12 +2420,8 @@ const styles = StyleSheet.create({
   serviceNotice: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 14, borderWidth: 1, marginTop: 20, padding: 14 },
   serviceNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15 },
   serviceNoticeText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
-  newsSectionIntro: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 9 },
-  newsDatasetCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 10, padding: 14 },
-  newsDatasetTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 20 },
-  newsDatasetDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
-  newsDatasetMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11 },
-  newsDatasetAction: { color: "#123a63", fontSize: 14, fontWeight: "700", marginTop: 10 },
+  serviceComingSoon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 16, padding: 13 },
+  serviceComingSoonText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
   externalButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, marginTop: 16, minHeight: 50, padding: 15 },
   externalButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 14 },
   externalHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 12, textAlign: "center" },
@@ -1415,13 +2429,24 @@ const styles = StyleSheet.create({
   silenceTime: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 40 },
   silenceTitle: { color: "#eef4ff", fontFamily: FONTS.semibold, fontSize: 14, marginTop: 8, textAlign: "center" },
   silenceCountdown: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, marginTop: 8, textAlign: "center" },
+  silenceContent: { paddingBottom: 32, paddingHorizontal: 20 },
+  silenceHero: { alignItems: "center", backgroundColor: COLORS.navyDark, borderRadius: 18, marginTop: 20, overflow: "hidden", padding: 24 },
+  silenceHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
+  silenceHeroKicker: { color: "#d3e4ff", fontFamily: FONTS.semibold, fontSize: 11, letterSpacing: 1, marginTop: 14 },
+  silenceHeroTime: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 45, letterSpacing: -1, marginTop: 4 },
+  silenceHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, marginTop: 4, textAlign: "center" },
+  remembranceCard: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 14, padding: 14 },
+  remembranceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  remembranceCopy: { flex: 1 },
+  remembranceTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
+  remembranceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 4 },
   accessibilityTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 18 },
   accessibilityIntro: { color: "#596574", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
   inlineLoader: { marginTop: 12 },
   inlineError: { backgroundColor: "#fff5f4", borderColor: "#f4ceca", borderRadius: 12, borderWidth: 1, marginTop: 12, padding: 14 },
   inlineErrorText: { color: "#991b1b", fontFamily: FONTS.regular, fontSize: 13 },
   inlineRetry: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13, marginTop: 8 },
-  accessibilityList: { gap: 12, paddingBottom: 30, paddingTop: 16 },
+  accessibilityList: { gap: 12, paddingBottom: 30, paddingHorizontal: 20, paddingTop: 16 },
   accessibilityCount: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginBottom: 2 },
   staleData: { color: "#795000", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginBottom: 4 },
   accessibilityCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
@@ -1430,9 +2455,39 @@ const styles = StyleSheet.create({
   accessibilityDate: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12, marginTop: 9 },
   accessibilityFooter: { marginTop: 8 },
   accessibilityNote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, textAlign: "center" },
+  miniaturesList: { gap: 10, paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
+  miniaturesMapCard: { borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, height: 220, overflow: "hidden" },
+  miniaturesCountRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 12 },
+  miniaturesCountPill: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 14, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 6 },
+  miniaturesCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
+  miniaturesSourceDate: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10 },
+  miniaturesNotice: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
+  miniaturesNoticeText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16 },
+  miniaturesListTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 9 },
+  miniatureCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
+  miniatureCardTop: { alignItems: "center", flexDirection: "row", gap: 10 },
+  miniatureNumber: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, height: 35, justifyContent: "center", width: 35 },
+  miniatureNumberText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  miniatureCardCopy: { flex: 1 },
+  miniatureTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
+  miniatureAddress: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  miniatureSummary: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 11 },
+  miniatureMeta: { flexDirection: "row", flexWrap: "wrap", marginTop: 9 },
+  miniatureMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
+  miniatureMapAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, marginTop: 12 },
+  miniatureMapActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  miniaturesFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, marginHorizontal: 14, marginTop: 10, textAlign: "center" },
   sourceButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 14, minHeight: 46 },
   sourceButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  parkingContent: { gap: 10, paddingBottom: 32 },
+  parkingContent: { gap: 10, paddingBottom: 32, paddingHorizontal: 20 },
+  parkingHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 18, padding: 17 },
+  parkingHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  parkingHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  parkingHeroBadge: { backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(247,190,61,0.35)", borderRadius: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 5 },
+  parkingHeroBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
+  parkingHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, marginTop: 15 },
+  parkingHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  parkingSectionHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 14 },
   parkingActionCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 1, padding: 14 },
   parkingActionHeading: { alignItems: "center", flexDirection: "row", gap: 10 },
   parkingActionIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
@@ -1452,20 +2507,44 @@ const styles = StyleSheet.create({
   searchModeActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
   searchModeText: { color: "#596574", fontFamily: FONTS.medium, fontSize: 12 },
   searchModeTextActive: { color: "#ffffff", fontFamily: FONTS.semibold },
-  list: { gap: 9, paddingVertical: 16 },
+  list: { gap: 9, paddingBottom: 22, paddingHorizontal: 20, paddingTop: 16 },
+  transportListHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 2 },
   routeCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 68, padding: 12 },
   routeBadge: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 8, justifyContent: "center", minWidth: 47, paddingHorizontal: 7, paddingVertical: 8 },
   routeBadgeText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 15 },
+  routeCardCopy: { flex: 1 },
   routeName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
+  routeCardMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
   stopCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 10, minHeight: 68, padding: 13 },
   stopCardText: { flex: 1 },
   stopCardName: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
   stopCardAction: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, marginTop: 4 },
   empty: { color: COLORS.muted, fontFamily: FONTS.regular, textAlign: "center" },
+  transportEmptyState: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 6, padding: 22 },
+  transportEmptyIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 48, justifyContent: "center", width: 48 },
+  transportEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginTop: 12, textAlign: "center" },
+  transportEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
+  transportEmptyActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16 },
+  transportEmptyPrimaryAction: { backgroundColor: COLORS.navy, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  transportEmptyPrimaryActionText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 12 },
+  transportEmptySecondaryAction: { backgroundColor: COLORS.blueSurface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  transportEmptySecondaryActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
   back: { color: "#123a63", fontSize: 16, fontWeight: "600", marginTop: 20 },
   stopDetailsTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 23, lineHeight: 29, marginTop: 16 },
   stopDetailsSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
   routeHeader: { alignItems: "center", flexDirection: "row", gap: 12, marginVertical: 16 },
+  routeDetailHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginBottom: 14, marginTop: 10, padding: 16 },
+  routeDetailTopLine: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  routeDetailRouteIdentity: { alignItems: "center", flexDirection: "row", gap: 8 },
+  routeDetailRouteLabel: { color: "#c9d8ee", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.8 },
+  routeDetailRouteBadge: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 12, height: 50, justifyContent: "center", minWidth: 54, paddingHorizontal: 10 },
+  routeDetailRouteNumber: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 27, lineHeight: 31 },
+  routeDetailPlanMark: { alignItems: "center", backgroundColor: "rgba(247,190,61,0.13)", borderColor: "rgba(247,190,61,0.38)", borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingVertical: 6 },
+  routeDetailPlanMarkText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
+  routeDetailTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, lineHeight: 26, marginTop: 14 },
+  routeDetailTermini: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  routeDetailSource: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 14 },
+  routeDetailSourceText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 11, flex: 1, lineHeight: 16 },
   routeMapPreview: { borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, height: 190, marginBottom: 12, overflow: "hidden" },
   routeMapPreviewMap: { flex: 1 },
   routeMapPreviewLabel: { backgroundColor: "rgba(0,36,70,0.88)", bottom: 10, borderRadius: 8, left: 10, paddingHorizontal: 10, paddingVertical: 7, position: "absolute" },
@@ -1474,14 +2553,30 @@ const styles = StyleSheet.create({
   transportDataNoticeTitle: { color: "#123a63", fontSize: 14, fontWeight: "700" },
   transportDataNoticeText: { color: "#43474e", fontSize: 13, lineHeight: 18, marginTop: 5 },
   hint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginBottom: 8 },
-  mapButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, marginBottom: 12, minHeight: 47, padding: 13 },
+  mapButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginBottom: 14, minHeight: 47, padding: 13 },
   mapButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  detailsList: { gap: 14, paddingBottom: 32 },
+  stopsIntro: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+  stopsHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16 },
+  stopsCountPill: { alignItems: "center", backgroundColor: "#e7eeff", borderRadius: 14, height: 28, justifyContent: "center", minWidth: 28, paddingHorizontal: 8 },
+  stopsCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  detailsList: { gap: 14, paddingBottom: 32, paddingHorizontal: 20 },
+  routeDetailsContent: { paddingBottom: 34, paddingHorizontal: 20 },
+  directionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 12, marginBottom: 10, padding: 11 },
+  directionCopy: { flex: 1 },
+  directionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
+  directionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  directionSwitchButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, height: 39, justifyContent: "center", width: 39 },
   variant: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, overflow: "hidden", padding: 14 },
-  variantTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 11 },
-  stopRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 44 },
-  stopNumber: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13, width: 22 },
+  variantHeading: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 11 },
+  variantTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
+  stopRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 47 },
+  stopSequence: { alignItems: "center", alignSelf: "stretch", justifyContent: "center", width: 17 },
+  stopDot: { backgroundColor: "#a6c9fa", borderRadius: 4, height: 8, width: 8, zIndex: 1 },
+  stopDotStart: { backgroundColor: COLORS.green, height: 10, width: 10 },
+  stopDotEnd: { backgroundColor: COLORS.gold, height: 10, width: 10 },
+  stopLine: { backgroundColor: "#d3e4ff", bottom: -2, position: "absolute", top: 26, width: 2 },
   stopName: { color: "#4b5968", flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
+  stopScheduleLink: { alignItems: "center", flexDirection: "row", gap: 1 },
   stopSchedule: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
   scheduleTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 23, marginTop: 16 },
   scheduleSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
@@ -1490,7 +2585,7 @@ const styles = StyleSheet.create({
   dateButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 20 },
   selectedDate: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginTop: 2 },
   sourcesTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 18 },
-  sourcesList: { gap: 10, paddingVertical: 16 },
+  sourcesList: { gap: 10, paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
   sourceCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
   sourceCardTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
   sourceText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
@@ -1502,7 +2597,36 @@ const styles = StyleSheet.create({
   mapHeader: { backgroundColor: "#f8f9ff", paddingHorizontal: 20, paddingVertical: 14 },
   mapTitle: { color: "#071d31", fontSize: 18, fontWeight: "700", marginTop: 14 },
   mapHint: { color: "#43474e", fontSize: 13, marginTop: 4 },
-  map: { flex: 1 },
+  mapDirectionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 10, marginBottom: 10, marginHorizontal: 20, padding: 10 },
+  mapDirectionCopy: { flex: 1 },
+  mapDirectionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
+  mapDirectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
+  mapDirectionButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
+  mapCanvas: { flex: 1, position: "relative" },
+  mapGpsStatus: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 16, flexDirection: "row", gap: 7, left: 16, paddingHorizontal: 11, paddingVertical: 8, position: "absolute", right: 16, top: 14 },
+  mapGpsDot: { borderRadius: 4, height: 8, width: 8 },
+  mapGpsDotLive: { backgroundColor: "#2e673d" },
+  mapGpsDotStale: { backgroundColor: "#b7791f" },
+  mapGpsDotOffline: { backgroundColor: "#718096" },
+  mapGpsStatusText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  mapStopCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, left: 16, padding: 13, position: "absolute", right: 16, shadowColor: "#071d31", shadowOffset: { height: 5, width: 0 }, shadowOpacity: 0.14, shadowRadius: 13, top: 14 },
+  mapStopCardWithGps: { top: 60 },
+  mapStopCardTop: { alignItems: "center", flexDirection: "row", gap: 10 },
+  mapStopIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
+  mapStopCopy: { flex: 1 },
+  mapStopName: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
+  mapStopDirection: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 2 },
+  mapStopScheduleLoading: { alignItems: "center", flexDirection: "row", gap: 7, marginTop: 13 },
+  mapStopScheduleText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
+  mapStopSchedule: { borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 12, paddingTop: 10 },
+  mapStopScheduleLabel: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11 },
+  mapStopTimes: { flexDirection: "row", gap: 7, marginTop: 7 },
+  mapStopTimePill: { backgroundColor: "#eff5ff", borderRadius: 10, flex: 1, paddingHorizontal: 8, paddingVertical: 7 },
+  mapStopScheduleTime: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17 },
+  mapStopMinutesText: { color: "#2e673d", fontFamily: FONTS.semibold, fontSize: 10, marginTop: 2 },
+  mapStopEmpty: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 12 },
+  mapStopError: { color: "#9a3412", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 12 },
+  mapStopFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 9 },
   loadingIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 56, justifyContent: "center", width: 56 },
   loadingSpinner: { marginTop: 17 },
   loadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 18, marginTop: 11 },

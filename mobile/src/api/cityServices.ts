@@ -24,6 +24,98 @@ export type OpenDataDatasetList = {
   datasets: OpenDataDataset[];
 };
 
+export type OfficialNewsItem = {
+  title: string;
+  sourceUrl: string;
+  publishedLabel: string | null;
+};
+
+export type OfficialNewsList = {
+  fetchedAt: string;
+  stale: boolean;
+  items: OfficialNewsItem[];
+};
+
+export type CurrencyRate = {
+  code: "USD" | "EUR" | "HUF" | "PLN";
+  buy: number;
+  sell: number;
+  updatedAt: string;
+};
+
+export type CurrencyRates = {
+  fetchedAt: string;
+  stale: boolean;
+  rates: CurrencyRate[];
+};
+
+export type WeatherHour = {
+  time: string;
+  temperatureC: number;
+  feelsLikeC: number;
+  condition: string;
+  iconUrl: string;
+  chanceOfRain: number;
+  windKph: number;
+};
+
+export type WeatherDay = {
+  date: string;
+  minTemperatureC: number;
+  maxTemperatureC: number;
+  condition: string;
+  iconUrl: string;
+  chanceOfRain: number;
+  sunrise: string;
+  sunset: string;
+  hours: WeatherHour[];
+};
+
+export type Weather = {
+  fetchedAt: string;
+  stale: boolean;
+  current: {
+    temperatureC: number;
+    feelsLikeC: number;
+    condition: string;
+    iconUrl: string;
+    windKph: number;
+    humidity: number;
+    airQuality: {
+      index: number;
+      pm25: number;
+      pm10: number;
+    } | null;
+    observedAt: string;
+  };
+  days: WeatherDay[];
+};
+
+export type MiniSculpture = {
+  id: string;
+  title: string;
+  latitude: number;
+  longitude: number;
+  address: string;
+  author: string;
+  installedAt: string;
+  summary: string;
+};
+
+export type MiniSculptureList = {
+  sourceCheckedAt: string;
+  verificationNotice: string;
+  sculptures: MiniSculpture[];
+};
+
+export type AirAlertStatus = {
+  state: "CLEAR" | "ACTIVE" | "UNAVAILABLE";
+  title: string;
+  detail: string;
+  fetchedAt: string;
+  stale: boolean;
+};
+
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
 const requestTimeoutMs = 8_000;
 
@@ -59,4 +151,24 @@ export async function getAccessibleBuildings(query?: string): Promise<Accessible
 
 export async function getLatestOpenDataDatasets(): Promise<OpenDataDatasetList> {
   return request("/api/city-services/open-data/datasets", "Не вдалося завантажити оновлення даних");
+}
+
+export async function getOfficialNews(): Promise<OfficialNewsList> {
+  return request("/api/city-services/news", "Не вдалося завантажити офіційні новини");
+}
+
+export async function getCurrencyRates(): Promise<CurrencyRates> {
+  return request("/api/city-services/currency", "Не вдалося завантажити курси валют");
+}
+
+export async function getWeather(): Promise<Weather> {
+  return request("/api/city-services/weather", "Не вдалося завантажити погоду");
+}
+
+export async function getMiniSculptures(): Promise<MiniSculptureList> {
+  return request("/api/city-services/miniatures", "Не вдалося завантажити мініскульптури");
+}
+
+export async function getAirAlertStatus(): Promise<AirAlertStatus> {
+  return request("/api/city-services/alerts/status", "Не вдалося завантажити статус тривоги");
 }

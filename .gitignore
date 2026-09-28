@@ -6,3 +6,6 @@ backend/target/
 .expo-cache/
 mobile/node_modules/
 mobile/.expo/
+mobile/.expo-web-check*/
+mobile/.expo-verify-*/
+mobile/dist/

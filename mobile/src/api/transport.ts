@@ -49,6 +49,23 @@ export type TransportRouteMap = {
   stops: TransportStop[];
 };
 
+export type TransportVehiclePosition = {
+  id: string;
+  routeNumber: string;
+  latitude: number;
+  longitude: number;
+  speedKph: number | null;
+  headingDegrees: number | null;
+  measuredAt: string | null;
+};
+
+export type TransportVehiclePositions = {
+  available: boolean;
+  stale: boolean;
+  fetchedAt: string;
+  vehicles: TransportVehiclePosition[];
+};
+
 export type TransportImportStatus = {
   available: boolean;
   completedAt: string | null;
@@ -115,6 +132,14 @@ export function getDepartures(routeId: string, stopId: string, date: string): Pr
 
 export function getRouteMap(routeId: string): Promise<TransportRouteMap> {
   return request(`/api/transport/routes/${routeId}/map`);
+}
+
+export function getVehiclePositions(routeNumber?: string): Promise<TransportVehiclePositions> {
+  const query = routeNumber?.trim();
+  const path = query
+    ? `/api/transport/vehicles?routeNumber=${encodeURIComponent(query)}`
+    : "/api/transport/vehicles";
+  return request(path);
 }
 
 export function getLatestTransportImport(): Promise<TransportImportStatus> {
