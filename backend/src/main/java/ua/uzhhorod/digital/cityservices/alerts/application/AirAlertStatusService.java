@@ -3,13 +3,18 @@ package ua.uzhhorod.digital.cityservices.alerts.application;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.stream.StreamSupport;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
+import ua.uzhhorod.digital.cityservices.alerts.api.AirAlertEventResponse;
+import ua.uzhhorod.digital.cityservices.alerts.api.AirAlertEventsResponse;
 import org.springframework.web.client.RestClient;
 import ua.uzhhorod.digital.cityservices.alerts.api.AirAlertStatusResponse;
 import ua.uzhhorod.digital.cityservices.alerts.api.AirAlertStatusResponse.State;
+import ua.uzhhorod.digital.notifications.ExpoPushNotificationService;
 
 /**
  * Uses the backend as a proxy so the alerts.in.ua token never reaches the mobile app.
@@ -23,22 +28,48 @@ public class AirAlertStatusService {
     private final String apiUrl;
     private final String apiToken;
     private final Duration cacheDuration;
+    private final AirAlertEventRepository events;
+    private final ExpoPushNotificationService notifications;
     private volatile Snapshot snapshot;
+    private volatile State lastRecordedState;
 
     public AirAlertStatusService(
             RestClient.Builder restClientBuilder,
             @Value("${city-services.alerts.api-url}") String apiUrl,
             @Value("${city-services.alerts.api-token:}") String apiToken,
-            @Value("${city-services.alerts.cache-duration:PT30S}") Duration cacheDuration) {
+            @Value("${city-services.alerts.cache-duration:PT30S}") Duration cacheDuration,
+            AirAlertEventRepository events,
+            ExpoPushNotificationService notifications) {
         this.restClient = restClientBuilder.build();
         this.apiUrl = apiUrl;
         this.apiToken = apiToken;
         this.cacheDuration = cacheDuration;
+        this.events = events;
+        this.notifications = notifications;
+        this.lastRecordedState = events.findTopByOrderByOccurredAtDesc()
+                .map(event -> State.valueOf(event.getState()))
+                .orElse(null);
     }
 
     public AirAlertStatusResponse getStatus() {
         Snapshot current = currentSnapshot();
         return new AirAlertStatusResponse(current.state(), current.title(), current.detail(), current.fetchedAt(), current.stale());
+    }
+
+    public AirAlertEventsResponse getEvents() {
+        List<AirAlertEventResponse> history = events.findTop50ByOrderByOccurredAtDesc().stream()
+                .map(event -> new AirAlertEventResponse(
+                        State.valueOf(event.getState()),
+                        event.getTitle(),
+                        event.getDetail(),
+                        event.getOccurredAt()))
+                .toList();
+        return new AirAlertEventsResponse(history);
+    }
+
+    @Scheduled(fixedDelayString = "${city-services.alerts.poll-delay:30000}")
+    public void pollForChanges() {
+        currentSnapshot();
     }
 
     private Snapshot currentSnapshot() {
@@ -70,6 +101,7 @@ public class AirAlertStatusService {
                 snapshot = regionalAlert == null
                         ? new Snapshot(State.CLEAR, "Повітряної тривоги немає", "У Закарпатській області", Instant.now(), false)
                         : activeSnapshot(regionalAlert);
+                recordTransition(snapshot);
                 return snapshot;
             } catch (RuntimeException error) {
                 if (cached != null) {
@@ -94,6 +126,25 @@ public class AirAlertStatusService {
 
     private Snapshot unavailable() {
         return new Snapshot(State.UNAVAILABLE, "Статус тривоги недоступний", "Перевіряйте офіційний застосунок «Повітряна тривога»", Instant.now(), false);
+    }
+
+    private void recordTransition(Snapshot current) {
+        if (current.state() == State.UNAVAILABLE || current.stale()) {
+            return;
+        }
+        State previous = lastRecordedState;
+        if (previous == null) {
+            lastRecordedState = current.state();
+            return;
+        }
+        if (previous == current.state()) {
+            return;
+        }
+        String title = current.state() == State.ACTIVE ? current.title() : "Відбій повітряної тривоги";
+        String detail = current.state() == State.ACTIVE ? current.detail() : "У Закарпатській області";
+        events.save(new AirAlertEvent(current.state().name(), title, detail, current.fetchedAt()));
+        notifications.sendAirAlert(title, detail, current.state() == State.ACTIVE);
+        lastRecordedState = current.state();
     }
 
     private record Snapshot(State state, String title, String detail, Instant fetchedAt, boolean stale) {

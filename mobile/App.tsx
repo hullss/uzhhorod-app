@@ -1,4 +1,4 @@
-import { StatusBar } from "expo-status-bar";
+import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
 import {
   PublicSans_400Regular,
@@ -9,6 +9,7 @@ import {
 } from "@expo-google-fonts/public-sans";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RouteMap, type MapRegion } from "./src/components/RouteMap";
+import { OfficialLayerMap } from "./src/components/OfficialLayerMap";
 import { MiniaturesMap } from "./src/components/MiniaturesMap";
 import {
   ActivityIndicator,
@@ -20,11 +21,13 @@ import {
   Linking,
   PanResponder,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from "react-native";
 import {
@@ -47,19 +50,30 @@ import {
 import {
   getAccessibleBuildings,
   getAirAlertStatus,
+  getAirAlertEvents,
   getCurrencyRates,
   getMiniSculptures,
   getOfficialNews,
+  getOfficialNewsArticle,
+  getSafetyMapPoints,
+  getEditorialEvents,
+  getEditorialDefenderFunds,
   getWeather,
   type AccessibleBuilding,
   type AccessibleBuildingList,
   type AirAlertStatus,
+  type AirAlertEvent,
   type CurrencyRates,
   type OfficialNewsList,
+  type OfficialNewsArticle,
+  type OfficialNewsItem,
+  type SafetyMapPoint,
   type MiniSculpture,
   type MiniSculptureList,
   type Weather,
 } from "./src/api/cityServices";
+import { changeAccountPassword, deleteAccount, loginAccount, logoutAccount, refreshAccountSession, registerAccount, updateAccountFavorites, type AccountSession } from "./src/api/account";
+import { clearSecureSession, persistSecureSession, restoreSecureSession } from "./src/storage/secureSession";
 
 type ScheduleView = {
   route: TransportRouteDetails;
@@ -80,7 +94,7 @@ type StopScreen = {
 };
 
 type CityService = {
-  id: "cnap" | "polls" | "accessibility" | "parking" | "shelters" | "resilience" | "waste" | "playgrounds" | "miniatures";
+  id: "cnap" | "transport-payment" | "polls" | "accessibility" | "parking" | "power-outages" | "shelters" | "resilience" | "waste" | "playgrounds" | "miniatures" | "donations" | "events";
   category: "mobility" | "civic" | "safety" | "places";
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
@@ -88,6 +102,31 @@ type CityService = {
   sourceLabel: string;
   sourceUrl?: string;
   notice?: string;
+};
+
+type DefenderFund = {
+  id: string;
+  title: string;
+  description: string;
+  donationUrl: string;
+  verifiedAt: string;
+  verificationSource: string;
+};
+
+type DemoPaymentCard = {
+  last4: string;
+  label: string;
+};
+
+type CityEvent = {
+  id: string;
+  title: string;
+  dateLabel: string;
+  day: number;
+  time?: string;
+  venue: string;
+  category: string;
+  sourceUrl: string;
 };
 
 const SERVICE_CATEGORIES: Array<{ id: CityService["category"]; title: string }> = [
@@ -100,6 +139,33 @@ const SERVICE_CATEGORIES: Array<{ id: CityService["category"]; title: string }> 
 type RootTab = "home" | "feed" | "services" | "profile";
 
 const CITY_SERVICES: CityService[] = [
+  {
+    id: "events",
+    category: "places",
+    icon: "calendar-outline",
+    title: "Події в місті",
+    description: "Концерти, вистави, фестивалі та зустрічі в Ужгороді.",
+    sourceLabel: "Відкрити афішу",
+    notice: "Добираємо події з вказаною датою, місцем і посиланням на джерело. Перед відвідуванням перевіряйте зміни у організатора.",
+  },
+  {
+    id: "transport-payment",
+    category: "mobility",
+    icon: "card-outline",
+    title: "Оплата проїзду",
+    description: "Попередній перегляд купівлі квитка до інтеграції з оператором.",
+    sourceLabel: "Відкрити оплату проїзду",
+    notice: "Оплата ще не приймає картки, не створює квиток і не списує кошти. Реальна оплата можлива лише після інтеграції з офіційним оператором.",
+  },
+  {
+    id: "donations",
+    category: "safety",
+    icon: "heart-outline",
+    title: "Підтримати військо",
+    description: "Добірка офіційних зборів на потреби закарпатських підрозділів.",
+    sourceLabel: "Відкрити добірку",
+    notice: "Додаємо лише збори з підтвердженим офіційним посиланням, метою та датою перевірки. Платежі проходять напряму на стороні отримувача.",
+  },
   {
     id: "cnap",
     category: "civic",
@@ -140,14 +206,24 @@ const CITY_SERVICES: CityService[] = [
     notice: "Оплату, штрафи та дані банківських карток застосунок не обробляє — це лише перехід до офіційного сервісу.",
   },
   {
+    id: "power-outages",
+    category: "safety",
+    icon: "flash-outline",
+    title: "Світло за адресою",
+    description: "Перевірка аварійних, планових і графікових відключень від Закарпаттяобленерго.",
+    sourceLabel: "Перевірити адресу в Закарпаттяобленерго",
+    sourceUrl: "https://zakarpat.energy/customers/break-in-electricity-supply/realtime-outage/",
+    notice: "Офіційний сервіс показує причину вимкнення, час початку та орієнтовне відновлення за введеною адресою. Публічного API для показу цих даних у застосунку оператор поки не надає.",
+  },
+  {
     id: "shelters",
     category: "safety",
     icon: "shield-outline",
     title: "Укриття",
     description: "Мапа захисних споруд та важлива інформація про них.",
-    sourceLabel: "Відкрити офіційний набір",
-    sourceUrl: "https://data.rada-uzhgorod.gov.ua/dataset/14d3e436-281b-49c2-b178-c9a9c6b28a2e",
-    notice: "Офіційний файл з укриттями зараз перебуває на модерації. Додамо точки на мапу лише коли місто відкриє актуальні координати.",
+    sourceLabel: "Відкрити мапу укриттів",
+    sourceUrl: "https://geo.rada-uzhgorod.gov.ua/map/shelter#/16:22.290283,48.608131:0.00:0.00?baseLayer=osmb&layers=3317996270789854695",
+    notice: "Користуємося інтерактивною мапою міського геопорталу — вона є джерелом актуальних позначок і деталей укриттів.",
   },
   {
     id: "resilience",
@@ -155,8 +231,9 @@ const CITY_SERVICES: CityService[] = [
     icon: "flashlight-outline",
     title: "Пункти незламності",
     description: "Мапа пунктів допомоги під час тривалих відключень.",
-    sourceLabel: "Незабаром",
-    notice: "Перш ніж показувати мапу, отримаємо підтверджений перелік, графік роботи та контакти кожного пункту. Застарілі адреси в такому сервісі неприпустимі.",
+    sourceLabel: "Відкрити державну мапу",
+    sourceUrl: "https://nezlamnist.gov.ua/",
+    notice: "Адреси, графік і доступні послуги змінюються, тому відкриваємо актуальну державну мапу, а не дублюємо список у застосунку.",
   },
   {
     id: "waste",
@@ -189,23 +266,112 @@ const CITY_SERVICES: CityService[] = [
   },
 ];
 
+// This list intentionally starts empty. Add a collection only after its direct donation link,
+// official confirmation and the date of verification have been checked by the editorial team.
+const DEFENDER_FUNDS: DefenderFund[] = [];
+
+const FEATURED_DEFENDER_DONATION = {
+  title: "Рух підтримки закарпатських військових",
+  donationUrl: "https://send.monobank.ua/jar/6Uz6GSyc7k",
+  note: "Це постійна Банка Руху підтримки закарпатських військових. Актуальна потреба та звітність змінюються безпосередньо на сторінці mono.",
+};
+
+const EVENT_TICKETS = {
+  philharmonic80: "https://concert.ua/uk/booking/filarmoniyi-80-velikii-yuvileinii-koncert",
+  klavdia: "https://uzhgorod.internet-bilet.ua/uk/klavdia-petrivna",
+  zukhvala: "https://uzhgorod.kontramarka.ua/uk/0410-solnij-stendap-nasti-zuhvaloi-neobovazkova-ganba-v-uzgorodi-124592.html",
+  zimmer: "https://concert.ua/uk/booking/muzika-cimmera-uzhhorod",
+  ponomariov: "https://widget.kontramarka.ua/uk/widget509site1008/widget/event/100181160?siteEventId=263659&siteShowId=114286",
+  mamyneNamysto: "https://widget.kontramarka.ua/uk/widget585site1008/widget/event/100186558?siteEventId=285574&siteShowId=122994",
+  skay: "https://widget.kontramarka.ua/uk/widget512site1008/widget/event/100182928?siteEventId=269456&siteShowId=116732",
+  misto: "https://widget.kontramarka.ua/uk/widget597site11540/widget/event/186851",
+  homin: "https://widget.kontramarka.ua/uk/widget626site14789/widget/event/100187644?siteEventId=290282&siteShowId=107212",
+  einaudi: "https://widget.kontramarka.ua/uk/widget626site14789/widget/event/100186444?siteEventId=284723&siteShowId=109722",
+  baidak: "https://widget.kontramarka.ua/uk/widget557site14840/widget/event/189195?siteEventId=287685&siteShowId=123843",
+  improv: "https://widget.kontramarka.ua/uk/widget557site14874/widget/event/185300?siteEventId=284363&siteShowId=122525",
+  queen: "https://widget.kontramarka.ua/uk/widget626site11540/widget/event/187005?siteEventId=285873&siteShowId=123085",
+};
+const CITY_EVENTS: CityEvent[] = [
+  { id: "philharmonic-80", title: "Філармонії — 80", dateLabel: "1 жовтня", day: 1, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.philharmonic80 },
+  { id: "klavdia", title: "KLAVDIA PETRIVNA SHOW", dateLabel: "3 жовтня", day: 3, time: "18:00", venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.klavdia },
+  { id: "zukhvala", title: "Стендап Насті Зухвалої", dateLabel: "4 жовтня", day: 4, time: "18:00", venue: "Belfast 2.0, вул. Волошина, 26", category: "Стендап", sourceUrl: EVENT_TICKETS.zukhvala },
+  { id: "zimmer", title: "Музика Ганса Циммера при свічках", dateLabel: "5 жовтня", day: 5, time: "19:00", venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.zimmer },
+  { id: "ponomariov", title: "Олександр Пономарьов. Сольний концерт", dateLabel: "5 жовтня", day: 5, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.ponomariov },
+  { id: "mamyne-namysto", title: "Мюзикл «Мамине намисто»", dateLabel: "10 жовтня", day: 10, venue: "Закарпатська обласна філармонія", category: "Театр", sourceUrl: EVENT_TICKETS.mamyneNamysto },
+  { id: "skay", title: "СКАЙ. 25 років на сцені", dateLabel: "12 жовтня", day: 12, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.skay },
+  { id: "misto", title: "Пластична вистава «Місто»", dateLabel: "17 жовтня", day: 17, time: "19:00", venue: "Закарпатський драмтеатр", category: "Театр", sourceUrl: EVENT_TICKETS.misto },
+  { id: "homin", title: "Хор «Гомін» в Ужгороді", dateLabel: "18 жовтня", day: 18, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.homin },
+  { id: "einaudi", title: "Людовіко Ейнауді та Ян Тірсен при свічках", dateLabel: "22 жовтня", day: 22, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.einaudi },
+  { id: "baidak", title: "Василь Байдак в Ужгороді", dateLabel: "24 жовтня", day: 24, venue: "Закарпатська обласна філармонія", category: "Стендап", sourceUrl: EVENT_TICKETS.baidak },
+  { id: "improv", title: "Імпровізація з глядачами", dateLabel: "29 жовтня", day: 29, venue: "Закарпатський драмтеатр", category: "Шоу", sourceUrl: EVENT_TICKETS.improv },
+  { id: "queen", title: "Queen при свічках", dateLabel: "29 жовтня", day: 29, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.queen },
+];
+
+const CNAP_SERVICE_OPTIONS = [
+  "Реєстрація місця проживання",
+  "Витяг з реєстру територіальної громади",
+  "Соціальні послуги",
+  "Консультація щодо документів",
+];
+
 const PARKING_PORTAL_URL = "https://pdr.rada-uzhgorod.gov.ua/";
 const PARKING_EVACUATION_URL = "https://pdr.rada-uzhgorod.gov.ua/evacuation/";
 const PARKING_INSPECTOR_URL = "https://pdr.rada-uzhgorod.gov.ua/inspector/";
 const PARKING_DATASET_URL = "https://data.rada-uzhgorod.gov.ua/dataset/69463bbd-3985-45cf-8966-a35d709176a3";
+const UZHHOROD_DIGITAL_LOGO = require("./assets/brand/uzhhorod-digital-logo.png");
 
-const COLORS = {
+type AppPalette = {
+  navy: string;
+  navyDark: string;
+  mist: string;
+  blueSurface: string;
+  blueSoft: string;
+  ink: string;
+  muted: string;
+  tertiary: string;
+  border: string;
+  separator: string;
+  controlBorder: string;
+  gold: string;
+  green: string;
+  danger: string;
+};
+
+const LIGHT_COLORS: AppPalette = {
   navy: "#123a63",
   navyDark: "#002446",
   mist: "#f8f9ff",
   blueSurface: "#eef4ff",
   blueSoft: "#e4efff",
   ink: "#0f1d2a",
-  muted: "#64748b",
+  muted: "#5b6b7c",
+  tertiary: "#66758a",
   border: "#e2e8f0",
+  separator: "#d5dee9",
+  controlBorder: "#73879d",
   gold: "#e5ae2d",
   green: "#3d6836",
+  danger: "#a31d1d",
 };
+
+const DARK_COLORS: AppPalette = {
+  navy: "#8fc8ff",
+  navyDark: "#e7f2ff",
+  mist: "#071b2f",
+  blueSurface: "#102e4b",
+  blueSoft: "#173a59",
+  ink: "#f3f7fc",
+  muted: "#a9bed3",
+  tertiary: "#91a9bf",
+  border: "#234561",
+  separator: "#234561",
+  controlBorder: "#7399b9",
+  gold: "#f4c65b",
+  green: "#9dd38f",
+  danger: "#ffb4ad",
+};
+
+let COLORS: AppPalette = LIGHT_COLORS;
 
 const FONTS = {
   regular: "PublicSans_400Regular",
@@ -213,6 +379,10 @@ const FONTS = {
   semibold: "PublicSans_600SemiBold",
   bold: "PublicSans_700Bold",
 };
+
+function StatusBar(_props: { style?: "dark" | "light" }) {
+  return <ExpoStatusBar style={useColorScheme() === "dark" ? "light" : "dark"} />;
+}
 
 function CivicHeader(_props: {
   onOpenNotifications?: () => void;
@@ -224,28 +394,28 @@ function CivicHeader(_props: {
         <BrandMark />
         <View>
           <View style={styles.brandTitleRow}>
-            <Text style={styles.brandTitle}>Ужгород Поруч</Text>
+            <Text style={styles.brandTitle}>Ужгород Цифровий</Text>
           </View>
           <Text style={styles.brandSubtitle}>офіційні міські сервіси</Text>
         </View>
       </View>
-      <Text style={styles.headerDate}>{formatDashboardDate()}</Text>
     </View>
   );
 }
 
 function BrandMark({ size = 34 }: { size?: number }) {
-  return <View style={[styles.brandMark, { borderRadius: Math.round(size * 0.29), height: size, width: size }]}>
-    <Text style={[styles.brandMarkText, { fontSize: Math.round(size * 0.5) }]}>У</Text>
-    <View style={[styles.brandMarkAccent, { borderRadius: Math.round(size * 0.1), height: Math.max(5, Math.round(size * 0.18)), width: Math.max(5, Math.round(size * 0.18)) }]} />
-  </View>;
+  return <Image
+    accessibilityLabel="Логотип Ужгород Цифровий"
+    source={UZHHOROD_DIGITAL_LOGO}
+    style={[styles.brandMark, { borderRadius: Math.round(size * 0.22), height: size, width: size }]}
+  />;
 }
 
 function BrandIntro({ opacity, scale }: { opacity: Animated.Value; scale: Animated.Value }) {
   return <SafeAreaView style={styles.brandIntroScreen}>
     <Animated.View style={[styles.brandIntroContent, { opacity, transform: [{ scale }] }]}>
       <BrandMark size={88} />
-      <Text style={styles.brandIntroTitle}>Ужгород Поруч</Text>
+      <Text style={styles.brandIntroTitle}>Ужгород Цифровий</Text>
       <Text style={styles.brandIntroSubtitle}>Офіційні міські сервіси</Text>
     </Animated.View>
     <View style={styles.brandIntroFooter}>
@@ -257,7 +427,7 @@ function BrandIntro({ opacity, scale }: { opacity: Animated.Value; scale: Animat
 
 function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable style={styles.backLink} onPress={onPress}>
+    <Pressable accessibilityLabel={`Назад: ${label}`} accessibilityRole="button" hitSlop={6} style={styles.backLink} onPress={onPress}>
       <Ionicons name="chevron-back" size={18} color={COLORS.navyDark} />
       <Text style={styles.backLinkText}>{label}</Text>
     </Pressable>
@@ -266,10 +436,18 @@ function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
 
 function useSwipeBack(onBack: () => void) {
   return useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: (event) => event.nativeEvent.locationX <= 24,
-    onMoveShouldSetPanResponder: (_, gesture) => gesture.x0 <= 24 && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    // Do not capture the touch on start: that used to interrupt normal vertical scrolling
+    // near the left edge. Take control only after a clear, deliberate horizontal gesture.
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gesture) => (
+      gesture.x0 <= 28
+      && gesture.dx > 14
+      && gesture.dx > Math.abs(gesture.dy) * 1.4
+    ),
+    onPanResponderTerminationRequest: () => true,
     onPanResponderRelease: (_, gesture) => {
-      if (gesture.dx >= 84 && Math.abs(gesture.dy) < 80) {
+      const shouldGoBack = gesture.dx >= 96 || (gesture.dx >= 48 && gesture.vx >= 0.65);
+      if (shouldGoBack && Math.abs(gesture.dy) < 72) {
         onBack();
       }
     },
@@ -277,6 +455,10 @@ function useSwipeBack(onBack: () => void) {
 }
 
 export default function App() {
+  const systemColorScheme = useColorScheme();
+  const isDarkTheme = systemColorScheme === "dark";
+  COLORS = isDarkTheme ? DARK_COLORS : LIGHT_COLORS;
+  styles = buildStyles(isDarkTheme);
   const [fontsLoaded] = useFonts({
     PublicSans_400Regular,
     PublicSans_500Medium,
@@ -288,7 +470,14 @@ export default function App() {
   const introScale = useRef(new Animated.Value(0.94)).current;
   const [section, setSection] = useState<"hub" | "transport">("hub");
   const [activeTab, setActiveTab] = useState<RootTab>("home");
+  const [profilePanel, setProfilePanel] = useState<"notifications" | "language" | "account" | "payment-methods" | "legal" | null>(null);
+  const [account, setAccount] = useState<AccountSession | null>(null);
+  const [favoriteRouteIds, setFavoriteRouteIds] = useState<string[]>([]);
+  const [favoriteStopIds, setFavoriteStopIds] = useState<string[]>([]);
+  const [language, setLanguage] = useState<"uk" | "en">("uk");
+  const [demoPaymentCard, setDemoPaymentCard] = useState<DemoPaymentCard | null>(null);
   const [weatherOpen, setWeatherOpen] = useState(false);
+  const [selectedNewsArticle, setSelectedNewsArticle] = useState<{ item: OfficialNewsItem; returnTab: RootTab } | null>(null);
   const [selectedService, setSelectedService] = useState<CityService | null>(null);
   const [routes, setRoutes] = useState<TransportRoute[]>([]);
   const [stops, setStops] = useState<TransportStop[]>([]);
@@ -337,8 +526,17 @@ export default function App() {
       setWeatherOpen(false);
       return true;
     }
+    if (selectedNewsArticle) {
+      setActiveTab(selectedNewsArticle.returnTab);
+      setSelectedNewsArticle(null);
+      return true;
+    }
     if (selectedService) {
       setSelectedService(null);
+      return true;
+    }
+    if (profilePanel) {
+      setProfilePanel(null);
       return true;
     }
     if (activeTab !== "home") {
@@ -346,7 +544,7 @@ export default function App() {
       return true;
     }
     return false;
-  }, [activeTab, mapScreen, schedule, section, selectedRoute, selectedService, selectedStop, showDataSources, weatherOpen]);
+  }, [activeTab, mapScreen, profilePanel, schedule, section, selectedNewsArticle, selectedRoute, selectedService, selectedStop, showDataSources, weatherOpen]);
 
   const transportSwipeBack = useSwipeBack(goBack);
 
@@ -376,6 +574,20 @@ export default function App() {
   }, [goBack]);
 
   useEffect(() => {
+    let active = true;
+    void restoreSecureSession().then(async (storedSession) => {
+      if (!storedSession) return;
+      try {
+        const session = await refreshAccountSession(storedSession.accessToken);
+        if (active) await handleAuthenticated(session);
+      } catch {
+        await clearSecureSession().catch(() => undefined);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (section !== "transport") {
       return;
     }
@@ -401,10 +613,83 @@ export default function App() {
   }
 
   function navigateToTab(tab: RootTab) {
+    setSelectedNewsArticle(null);
     setSelectedService(null);
     setWeatherOpen(false);
     setSection("hub");
     setActiveTab(tab);
+  }
+
+  function openNewsArticle(item: OfficialNewsItem, returnTab: RootTab) {
+    setSelectedNewsArticle({ item, returnTab });
+  }
+
+  async function handleAuthenticated(session: AccountSession) {
+    setAccount(session);
+    setFavoriteRouteIds(session.favorites?.routeIds ?? []);
+    setFavoriteStopIds(session.favorites?.stopIds ?? []);
+    try {
+      await persistSecureSession(session);
+    } catch {
+      Alert.alert("Сесію не збережено", "Після перезапуску потрібно буде увійти ще раз.");
+    }
+  }
+
+  async function handleLogout() {
+    if (!account) return;
+    try {
+      await logoutAccount(account.accessToken);
+    } catch (requestError) {
+      Alert.alert("Не вдалося вийти", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
+      return;
+    }
+    await clearSecureSession().catch(() => undefined);
+    setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]); setDemoPaymentCard(null);
+    setProfilePanel(null);
+  }
+
+  async function handleDeleteAccount() {
+    if (!account) return;
+    try {
+      await deleteAccount(account.accessToken);
+    } catch (requestError) {
+      Alert.alert("Не вдалося видалити", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
+      return;
+    }
+    await clearSecureSession().catch(() => undefined);
+    setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]); setDemoPaymentCard(null);
+    setProfilePanel(null);
+    Alert.alert("Акаунт видалено", "Дані акаунта, налаштування та обране видалено.");
+  }
+
+  async function toggleFavorite(kind: "route" | "stop", id: string) {
+    if (!account) {
+      Alert.alert("Збереження в обраному", "Створіть акаунт або увійдіть, щоб зберегти маршрути та зупинки.", [
+        { text: "Не зараз", style: "cancel" },
+        { text: "До акаунта", onPress: () => { setSection("hub"); setActiveTab("profile"); setProfilePanel("account"); } },
+      ]);
+      return;
+    }
+
+    const previousRoutes = favoriteRouteIds;
+    const previousStops = favoriteStopIds;
+    const update = (items: string[]) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
+    const nextRoutes = kind === "route" ? update(favoriteRouteIds) : favoriteRouteIds;
+    const nextStops = kind === "stop" ? update(favoriteStopIds) : favoriteStopIds;
+    setFavoriteRouteIds(nextRoutes);
+    setFavoriteStopIds(nextStops);
+    try {
+      const favorites = await updateAccountFavorites(account.accessToken, nextRoutes, nextStops);
+      setFavoriteRouteIds(favorites.routeIds);
+      setFavoriteStopIds(favorites.stopIds);
+      const updatedSession = { ...account, favorites };
+      setAccount(updatedSession);
+      void persistSecureSession(updatedSession);
+    } catch (requestError) {
+      setFavoriteRouteIds(previousRoutes);
+      setFavoriteStopIds(previousStops);
+      Alert.alert("Не вдалося зберегти", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
+    }
   }
 
   function openCityService(id: CityService["id"]) {
@@ -495,15 +780,50 @@ export default function App() {
   }
 
   if (section === "hub") {
+    if (selectedNewsArticle) {
+      return <NewsArticleScreen
+        item={selectedNewsArticle.item}
+        backLabel={selectedNewsArticle.returnTab === "home" ? "До головної" : "До стрічки"}
+        onBack={() => {
+          setActiveTab(selectedNewsArticle.returnTab);
+          setSelectedNewsArticle(null);
+        }}
+      />;
+    }
     if (weatherOpen) {
       return <WeatherScreen onBack={() => setWeatherOpen(false)} />;
     }
     if (selectedService) {
+      if (selectedService.id === "events") {
+        return <CityEventsScreen onBack={() => setSelectedService(null)} />;
+      }
+      if (selectedService.id === "donations") {
+        return <DefendersSupportScreen onBack={() => setSelectedService(null)} />;
+      }
+      if (selectedService.id === "cnap") {
+        return <CnapAppointmentDemoScreen onBack={() => setSelectedService(null)} />;
+      }
+      if (selectedService.id === "transport-payment") {
+        return <TransportPaymentDemoScreen
+          card={demoPaymentCard}
+          onBack={() => setSelectedService(null)}
+          onManagePaymentMethods={() => { setSelectedService(null); setActiveTab("profile"); setProfilePanel("payment-methods"); }}
+        />;
+      }
       if (selectedService.id === "accessibility") {
         return <AccessibilityBuildingsScreen onBack={() => setSelectedService(null)} />;
       }
+      if (selectedService.id === "shelters") {
+        return <SafetyMapScreen kind="shelters" onBack={() => setSelectedService(null)} />;
+      }
+      if (selectedService.id === "resilience") {
+        return <SafetyMapScreen kind="resilience" onBack={() => setSelectedService(null)} />;
+      }
       if (selectedService.id === "parking") {
         return <ParkingScreen onBack={() => setSelectedService(null)} />;
+      }
+      if (selectedService.id === "polls") {
+        return <PollsScreen onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "miniatures") {
         return <MiniaturesScreen onBack={() => setSelectedService(null)} />;
@@ -511,10 +831,43 @@ export default function App() {
       return <CityServiceDetails service={selectedService} onBack={() => setSelectedService(null)} />;
     }
     if (activeTab === "feed") {
-      return <NewsScreen onChangeTab={navigateToTab} />;
+      return <NewsScreen onChangeTab={navigateToTab} onOpenArticle={(item) => openNewsArticle(item, "feed")} />;
     }
     if (activeTab === "profile") {
-      return <ProfileScreen onChangeTab={navigateToTab} />;
+      if (profilePanel === "notifications") {
+        return <NotificationSettingsScreen onBack={() => setProfilePanel(null)} />;
+      }
+      if (profilePanel === "language") {
+        return <LanguageSettingsScreen language={language} onChangeLanguage={setLanguage} onBack={() => setProfilePanel(null)} />;
+      }
+      if (profilePanel === "account") {
+        return <AccountScreen account={account} onAuthenticated={handleAuthenticated} onLogout={() => void handleLogout()} onDeleteAccount={() => void handleDeleteAccount()} onBack={() => setProfilePanel(null)} />;
+      }
+      if (profilePanel === "legal") {
+        return <LegalScreen onBack={() => setProfilePanel(null)} />;
+      }
+      if (profilePanel === "payment-methods") {
+        return <PaymentMethodsScreen
+          accountEmail={account?.preferences.email}
+          card={demoPaymentCard}
+          onBack={() => setProfilePanel(null)}
+          onSaveCard={setDemoPaymentCard}
+          onRemoveCard={() => setDemoPaymentCard(null)}
+        />;
+      }
+      return <ProfileScreen
+        accountEmail={account?.preferences.email}
+        favoriteSummary={account ? `${favoriteRouteIds.length} маршрутів · ${favoriteStopIds.length} зупинок` : undefined}
+        language={language}
+        isDarkTheme={isDarkTheme}
+          paymentCard={demoPaymentCard}
+        onOpenLanguage={() => setProfilePanel("language")}
+        onOpenNotifications={() => setProfilePanel("notifications")}
+        onOpenAccount={() => setProfilePanel("account")}
+          onOpenPaymentMethods={() => setProfilePanel("payment-methods")}
+        onOpenLegal={() => setProfilePanel("legal")}
+        onChangeTab={navigateToTab}
+      />;
     }
     if (activeTab === "services") {
       return <CityServicesHub
@@ -527,6 +880,7 @@ export default function App() {
       onOpenTransport={openTransportHub}
       onOpenWeather={() => setWeatherOpen(true)}
       onOpenService={openCityService}
+      onOpenArticle={(item) => openNewsArticle(item, "home")}
       onChangeTab={navigateToTab}
     />;
   }
@@ -553,6 +907,7 @@ export default function App() {
     return <RouteDetails
       route={selectedRoute}
       map={routeMapPreview}
+      favoriteStopIds={favoriteStopIds}
       onBack={() => {
         setSchedule(null);
         setMapScreen(null);
@@ -561,14 +916,17 @@ export default function App() {
       }}
       onSelectStop={(stop) => void openSchedule(selectedRoute, stop)}
       onOpenMap={(variantId) => void openMap(selectedRoute, variantId)}
+      onToggleFavoriteStop={(stopId) => void toggleFavorite("stop", stopId)}
     />;
   }
 
   if (selectedStop) {
     return <StopDetails
       stopScreen={selectedStop}
+      isFavorite={favoriteStopIds.includes(selectedStop.stop.id)}
       onBack={() => setSelectedStop(null)}
       onOpenRoute={(route) => void openRoute(route)}
+      onToggleFavorite={() => void toggleFavorite("stop", selectedStop.stop.id)}
     />;
   }
 
@@ -576,16 +934,19 @@ export default function App() {
     return <DataSourcesScreen onBack={() => setShowDataSources(false)} />;
   }
 
+  const orderedRoutes = [...routes].sort((left, right) => Number(favoriteRouteIds.includes(right.id)) - Number(favoriteRouteIds.includes(left.id)));
+
   return (
     <SafeAreaView {...transportSwipeBack} style={styles.transportScreen}>
       <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={styles.transportScrollContent} keyboardShouldPersistTaps="handled">
       <View style={styles.transportContent}>
         <CivicHeader onOpenNotifications={() => navigateToTab("feed")} onOpenProfile={() => navigateToTab("profile")} />
         <BackLink label="До сервісів" onPress={() => navigateToTab("services")} />
         <View style={styles.transportPageTitleRow}>
           <View style={styles.transportPageTitleCopy}>
             <Text style={styles.transportPageTitle}>Громадський транспорт</Text>
-            <Text style={styles.transportPageDescription}>Офіційний перелік маршрутів, схем та затверджених графіків руху.</Text>
+            <Text style={styles.transportPageDescription}>Маршрути, зупинки й плановий розклад.</Text>
           </View>
           <View style={[styles.transportPlanMark, importStatus?.available && styles.transportPlanMarkAvailable]}>
             <Ionicons name={importStatus?.available ? "checkmark-circle" : "time-outline"} size={13} color={importStatus?.available ? COLORS.green : "#795000"} />
@@ -594,16 +955,9 @@ export default function App() {
             </Text>
           </View>
         </View>
-        <View style={styles.transportSourceLine}>
-          <Ionicons name="information-circle-outline" size={16} color={COLORS.green} />
-          <View style={styles.transportSourceCopy}>
-            <Text style={styles.transportSourceTitle}>Затверджені планові дані</Text>
-            <Text style={styles.transportSourceText}>Маршрути, зупинки й планові розклади надходять з офіційного GTFS. Живі GPS-позиції показуємо на карті маршруту, коли вони доступні.</Text>
-            {importStatus?.completedAt ? <Text style={styles.transportUpdatedAt}>Оновлено: {formatUpdatedAt(importStatus.completedAt)}</Text> : null}
-          </View>
-        </View>
-        <Pressable style={styles.dataSourcesInlineLink} onPress={() => setShowDataSources(true)}>
-          <Text style={styles.dataSourcesInlineLinkText}>Переглянути джерела даних</Text>
+        <Pressable style={styles.transportDataMeta} onPress={() => setShowDataSources(true)}>
+          <Ionicons name="information-circle-outline" size={15} color={COLORS.navy} />
+          <Text style={styles.transportDataMetaText}>Джерело та оновлення розкладу{importStatus?.completedAt ? ` · ${formatUpdatedAt(importStatus.completedAt)}` : ""}</Text>
           <Ionicons name="chevron-forward" size={15} color={COLORS.navy} />
         </Pressable>
         <View style={styles.searchBox}>
@@ -619,12 +973,18 @@ export default function App() {
         </View>
         <View style={styles.searchModes}>
           <Pressable
+            accessibilityLabel="Показати маршрути"
+            accessibilityRole="radio"
+            accessibilityState={{ selected: searchMode === "routes" }}
             style={[styles.searchMode, searchMode === "routes" && styles.searchModeActive]}
             onPress={() => setSearchMode("routes")}
           >
             <Text style={[styles.searchModeText, searchMode === "routes" && styles.searchModeTextActive]}>Маршрути</Text>
           </Pressable>
           <Pressable
+            accessibilityLabel="Показати зупинки"
+            accessibilityRole="radio"
+            accessibilityState={{ selected: searchMode === "stops" }}
             style={[styles.searchMode, searchMode === "stops" && styles.searchModeActive]}
             onPress={() => setSearchMode("stops")}
           >
@@ -632,44 +992,27 @@ export default function App() {
           </Pressable>
         </View>
       </View>
-      {searchMode === "routes" ? (
-        <FlatList
-          data={routes}
-          keyExtractor={(route) => route.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <Pressable style={styles.routeCard} onPress={() => void openRoute(item)}>
-              <View style={styles.routeBadge}>
-                <Text style={styles.routeBadgeText}>{item.routeNumber}</Text>
-              </View>
-              <View style={styles.routeCardCopy}>
-                <Text style={styles.routeName}>{item.name}</Text>
-                <Text style={styles.routeCardMeta}>Схема зупинок і плановий розклад</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-            </Pressable>
-          )}
-          ListHeaderComponent={<Text style={styles.transportListHeading}>{query ? "Результати пошуку" : "Усі маршрути"}</Text>}
-          ListEmptyComponent={<TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("stops")} />}
-        />
-      ) : (
-        <FlatList
-          data={stops}
-          keyExtractor={(stop) => stop.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <Pressable style={styles.stopCard} onPress={() => void openStop(item)}>
-              <View style={styles.stopCardText}>
-                <Text style={styles.stopCardName}>{item.name}</Text>
-                <Text style={styles.stopCardAction}>Переглянути маршрути</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-            </Pressable>
-          )}
-          ListHeaderComponent={<Text style={styles.transportListHeading}>{query ? "Результати пошуку" : "Усі зупинки"}</Text>}
-          ListEmptyComponent={<TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("routes")} />}
-        />
-      )}
+      <View style={styles.list}>
+        <Text style={styles.transportListHeading}>{query ? "Результати пошуку" : searchMode === "routes" ? "Усі маршрути" : "Усі зупинки"}</Text>
+        {!query && searchMode === "routes" && favoriteRouteIds.length > 0 ? <Text style={styles.transportSavedHint}>Обрані маршрути показано першими</Text> : null}
+        {searchMode === "routes" ? orderedRoutes.map((item) => (
+          <Pressable key={item.id} accessibilityLabel={`Маршрут ${item.routeNumber}: ${item.name}`} accessibilityRole="button" style={styles.routeCard} onPress={() => void openRoute(item)}>
+            <View style={styles.routeBadge}><Text style={styles.routeBadgeText}>{item.routeNumber}</Text></View>
+            <View style={styles.routeCardCopy}><Text numberOfLines={2} style={styles.routeName}>{item.name}</Text><Text style={styles.routeCardMeta}>Схема зупинок і плановий розклад</Text></View>
+            <FavoriteButton selected={favoriteRouteIds.includes(item.id)} onPress={() => void toggleFavorite("route", item.id)} />
+            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+          </Pressable>
+        )) : stops.map((item) => (
+          <Pressable key={item.id} accessibilityLabel={`Зупинка: ${stopDisplayName(item.name)}`} accessibilityRole="button" style={styles.stopCard} onPress={() => void openStop(item)}>
+            <View style={styles.stopCardText}><Text numberOfLines={2} style={styles.stopCardName}>{stopDisplayName(item.name)}</Text>{stopDisplayCode(item.name) ? <Text style={styles.stopCardAction}>Зупинка №{stopDisplayCode(item.name)}</Text> : null}</View>
+            <FavoriteButton selected={favoriteStopIds.includes(item.id)} onPress={() => void toggleFavorite("stop", item.id)} />
+            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+          </Pressable>
+        ))}
+        {searchMode === "routes" && routes.length === 0 && <TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("stops")} />}
+        {searchMode === "stops" && stops.length === 0 && <TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("routes")} />}
+      </View>
+      </ScrollView>
       <BottomNavigation activeTab="services" onChangeTab={navigateToTab} />
     </SafeAreaView>
   );
@@ -690,12 +1033,7 @@ function CityServicesHub({
       <ScrollView contentContainerStyle={styles.hubContent}>
         <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
         <View style={styles.pageIntro}>
-          <View style={styles.eyebrowRow}>
-            <View style={styles.eyebrowDot} />
-          <Text style={styles.eyebrow}>Усе для міста</Text>
-          </View>
           <Text style={styles.pageTitle}>Сервіси</Text>
-          <Text style={styles.pageDescription}>Обирайте за тим, що потрібно зробити просто зараз.</Text>
         </View>
 
         {SERVICE_CATEGORIES.map((category, index) => {
@@ -719,7 +1057,7 @@ function CityServicesHub({
 }
 
 function ServiceGridCard({ icon, title, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; onPress: () => void }) {
-  return <Pressable style={styles.serviceGridCard} onPress={onPress}>
+  return <Pressable accessibilityLabel={`Відкрити сервіс: ${title}`} accessibilityRole="button" style={styles.serviceGridCard} onPress={onPress}>
     <View style={styles.serviceGridIcon}><Ionicons name={icon} size={23} color={COLORS.navy} /></View>
     <View style={styles.serviceGridFooter}>
       <Text numberOfLines={2} style={styles.serviceGridTitle}>{title}</Text>
@@ -732,22 +1070,35 @@ function HomeScreen({
   onOpenTransport,
   onOpenWeather,
   onOpenService,
+  onOpenArticle,
   onChangeTab,
 }: {
   onOpenTransport: () => void;
   onOpenWeather: () => void;
   onOpenService: (id: CityService["id"]) => void;
+  onOpenArticle: (item: OfficialNewsItem) => void;
   onChangeTab: (tab: RootTab) => void;
 }) {
+  const [newsRefreshSignal, setNewsRefreshSignal] = useState(0);
+  const [refreshingNews, setRefreshingNews] = useState(false);
+  const finishNewsRefresh = useCallback(() => setRefreshingNews(false), []);
+
+  function refreshNews() {
+    setRefreshingNews(true);
+    setNewsRefreshSignal((value) => value + 1);
+  }
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.dashboardContent}>
+      <ScrollView
+        contentContainerStyle={styles.dashboardContent}
+        refreshControl={<RefreshControl refreshing={refreshingNews} onRefresh={refreshNews} tintColor={COLORS.navy} />}
+      >
         <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
         <View style={styles.dashboardTop}>
           <View>
-            <Text style={styles.dashboardDate}>{formatDashboardDate()}</Text>
-            <Text style={styles.dashboardDay}>{formatDashboardDay()}</Text>
+            <Text style={styles.dashboardDay}>{formatDashboardDay()}, {formatDashboardDate()}</Text>
           </View>
           <View style={styles.dashboardCityChip}>
             <Ionicons name="location-outline" size={16} color={COLORS.navyDark} />
@@ -757,28 +1108,113 @@ function HomeScreen({
 
         <WeatherPreview onPress={onOpenWeather} />
 
-        <AirAlertBanner />
-
-        <CurrencyWidget />
+        <DefendersSupportBanner onPress={() => void openOfficialLink(FEATURED_DEFENDER_DONATION.donationUrl)} />
 
         <View style={styles.dashboardSectionRow}>
           <Text style={styles.dashboardSectionTitle}>Важливе</Text>
           <Pressable onPress={() => onChangeTab("feed")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
         </View>
-        <OfficialNewsPreview onOpenFeed={() => onChangeTab("feed")} />
+        <OfficialNewsPreview
+          refreshSignal={newsRefreshSignal}
+          onLoadEnd={finishNewsRefresh}
+          onOpenFeed={() => onChangeTab("feed")}
+          onOpenArticle={onOpenArticle}
+        />
+
+        <CurrencyWidget />
 
         <View style={styles.dashboardSectionRow}>
           <Text style={styles.dashboardSectionTitle}>Популярні сервіси</Text>
           <Pressable onPress={() => onChangeTab("services")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dashboardServicesRow}>
+        <View style={styles.dashboardServicesGrid}>
           <DashboardServiceCard icon="bus-outline" title="Рух транспорту" onPress={onOpenTransport} />
+          <DashboardServiceCard icon="card-outline" title="Оплата проїзду" onPress={() => onOpenService("transport-payment")} />
           <DashboardServiceCard icon="car-outline" title="Паркування" onPress={() => onOpenService("parking")} />
           <DashboardServiceCard icon="accessibility-outline" title="Доступне місто" onPress={() => onOpenService("accessibility")} />
           <DashboardServiceCard icon="document-text-outline" title="Запис до ЦНАП" onPress={() => onOpenService("cnap")} />
-        </ScrollView>
+        </View>
       </ScrollView>
       <BottomNavigation activeTab="home" onChangeTab={onChangeTab} />
+    </SafeAreaView>
+  );
+}
+
+function DefendersSupportBanner({ onPress }: { onPress: () => void }) {
+  return <Pressable
+    accessibilityHint="Відкриває постійну Банку mono"
+    accessibilityLabel="Підтримати захисників Закарпаття"
+    onPress={onPress}
+    style={styles.defendersBanner}
+  >
+    <View style={styles.defendersBannerIcon}><Ionicons name="heart" size={19} color={COLORS.gold} /></View>
+    <View style={styles.defendersBannerCopy}>
+      <Text style={styles.defendersBannerTitle}>Підтримати військо</Text>
+      <Text style={styles.defendersBannerText}>Банка Руху підтримки закарпатських військових</Text>
+    </View>
+    <Ionicons name="open-outline" size={18} color={COLORS.navy} />
+  </Pressable>;
+}
+
+function DefendersSupportScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
+  const [funds, setFunds] = useState<DefenderFund[]>(DEFENDER_FUNDS);
+
+  useEffect(() => {
+    void getEditorialDefenderFunds().then((editorial) => {
+      if (editorial.items.length > 0) setFunds(editorial.items);
+    }).catch(() => {
+      // The permanent mono jar and a safe empty list remain visible until the API is deployed.
+    });
+  }, []);
+
+  return (
+    <SafeAreaView {...swipeBack} style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={styles.defendersContent}>
+        <CivicHeader />
+        <BackLink label="До головної" onPress={onBack} />
+        <View style={styles.defendersIntro}>
+          <Text style={styles.defendersIntroTitle}>Підтримка захисників</Text>
+          <Text style={styles.defendersIntroText}>Лише прямі, перевірені посилання на збори для підрозділів, пов’язаних із Закарпаттям.</Text>
+        </View>
+
+        <View style={styles.featuredDonationCard}>
+          <View style={styles.featuredDonationTop}>
+            <View style={styles.featuredDonationIcon}><Ionicons name="heart" size={20} color="#f7be3d" /></View>
+            <View style={styles.featuredDonationCopy}>
+              <Text style={styles.featuredDonationLabel}>ПОСТІЙНА БАНКА MONO</Text>
+              <Text style={styles.featuredDonationTitle}>{FEATURED_DEFENDER_DONATION.title}</Text>
+            </View>
+          </View>
+          <Text style={styles.featuredDonationText}>{FEATURED_DEFENDER_DONATION.note}</Text>
+          <Pressable style={styles.featuredDonationButton} onPress={() => void openOfficialLink(FEATURED_DEFENDER_DONATION.donationUrl)}>
+            <Ionicons name="heart-outline" size={18} color={COLORS.navyDark} />
+            <Text style={styles.featuredDonationButtonText}>Відкрити Банку</Text>
+            <Ionicons name="open-outline" size={16} color={COLORS.navyDark} />
+          </Pressable>
+        </View>
+
+        {funds.length > 0 ? <View style={styles.defendersFundList}>
+          <Text style={styles.defendersListTitle}>Перевірені збори</Text>
+          {funds.map((fund) => <View key={fund.id} style={styles.defendersFundCard}>
+            <View style={styles.defendersFundTop}>
+              <View style={styles.defendersFundIcon}><Ionicons name="flag-outline" size={20} color={COLORS.navy} /></View>
+              <View style={styles.defendersFundCopy}>
+                <Text style={styles.defendersFundTitle}>{fund.title}</Text>
+                <Text style={styles.defendersFundVerified}>Перевірено: {formatDateOnly(fund.verifiedAt)}</Text>
+              </View>
+            </View>
+            <Text style={styles.defendersFundDescription}>{fund.description}</Text>
+            <Text style={styles.defendersFundSource}>Підтвердження: {fund.verificationSource}</Text>
+            <Pressable style={styles.defendersDonateButton} onPress={() => void openOfficialLink(fund.donationUrl)}>
+              <Ionicons name="heart-outline" size={18} color="#ffffff" />
+              <Text style={styles.defendersDonateButtonText}>Перейти до донату</Text>
+              <Ionicons name="open-outline" size={16} color="#ffffff" />
+            </Pressable>
+          </View>)}
+        </View> : <Text style={styles.defendersFootnote}>Нові збори додаватимемо після перевірки джерела, мети й актуальності посилання.</Text>}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -790,13 +1226,17 @@ function DashboardServiceCard({ icon, title, onPress }: { icon: keyof typeof Ion
   </Pressable>;
 }
 
-function OfficialNewsPreview({ onOpenFeed }: { onOpenFeed: () => void }) {
+function OfficialNewsPreview({ refreshSignal, onLoadEnd, onOpenFeed, onOpenArticle }: { refreshSignal: number; onLoadEnd: () => void; onOpenFeed: () => void; onOpenArticle: (item: OfficialNewsItem) => void }) {
   const [data, setData] = useState<OfficialNewsList | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void getOfficialNews().then(setData).catch(() => setData(null)).finally(() => setLoading(false));
-  }, []);
+    setLoading(true);
+    void getOfficialNews(refreshSignal > 0).then(setData).catch(() => setData(null)).finally(() => {
+      setLoading(false);
+      onLoadEnd();
+    });
+  }, [onLoadEnd, refreshSignal]);
 
   if (loading) {
     return <View style={styles.dashboardFeedCard}><ActivityIndicator color={COLORS.navy} /><Text style={styles.dashboardFeedText}>Завантажуємо офіційні новини…</Text></View>;
@@ -814,11 +1254,10 @@ function OfficialNewsPreview({ onOpenFeed }: { onOpenFeed: () => void }) {
   }
 
   return <View style={styles.homeNewsList}>
-    {data.items.slice(0, 3).map((item) => <Pressable key={item.sourceUrl} style={styles.homeNewsItem} onPress={() => void openOfficialLink(item.sourceUrl)}>
-      <View style={styles.homeNewsIcon}><Ionicons name="megaphone-outline" size={18} color={COLORS.navy} /></View>
+    {data.items.slice(0, 3).map((item) => <Pressable key={item.sourceUrl} style={styles.homeNewsItem} onPress={() => onOpenArticle(item)}>
       <View style={styles.homeNewsCopy}>
         <Text numberOfLines={2} style={styles.homeNewsTitle}>{item.title}</Text>
-        <Text style={styles.homeNewsMeta}>{item.publishedLabel ?? "Офіційна публікація"}</Text>
+        {item.publishedLabel ? <Text style={styles.homeNewsMeta}>{item.publishedLabel}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
     </Pressable>)}
@@ -831,12 +1270,14 @@ function OfficialNewsPreview({ onOpenFeed }: { onOpenFeed: () => void }) {
 
 function CurrencyWidget() {
   const [data, setData] = useState<CurrencyRates | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void getCurrencyRates().then(setData).catch(() => setData(null));
+    void getCurrencyRates().then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, []);
 
-  const mainRates = data?.rates ?? [];
+  const rates = data?.rates ?? [];
+  const mainRates = rates.slice(0, 4);
   return (
     <View style={styles.currencyWidget}>
       <View style={styles.currencyWidgetHeading}>
@@ -852,7 +1293,7 @@ function CurrencyWidget() {
           <Text style={styles.currencyValue}>{formatCurrency(rate.sell)}</Text>
           <Text style={styles.currencyMeta}>продаж</Text>
         </View>)}
-      </View> : <Text style={styles.currencyUnavailable}>Курси тимчасово завантажуються</Text>}
+      </View> : <Text style={styles.currencyUnavailable}>{loading ? "Завантажуємо курси…" : "Курси зараз недоступні"}</Text>}
       {data?.stale ? <Text style={styles.currencyStale}>Показано останнє доступне оновлення</Text> : null}
     </View>
   );
@@ -860,66 +1301,40 @@ function CurrencyWidget() {
 
 function WeatherPreview({ onPress }: { onPress: () => void }) {
   const [data, setData] = useState<Weather | null>(null);
+  const [alert, setAlert] = useState<AirAlertStatus | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(true);
 
   useEffect(() => {
-    void getWeather().then(setData).catch(() => setData(null));
-  }, []);
-
-  const airQuality = data?.current.airQuality;
-  return <Pressable style={styles.weatherFeatureCard} onPress={onPress}>
-    <View style={styles.weatherFeatureMain}>
-      <View>
-        <Text style={styles.weatherFeatureLabel}>Погода зараз</Text>
-        <View style={styles.weatherFeatureTemperatureRow}>
-          <Text style={styles.weatherFeatureTemperature}>{data ? `${Math.round(data.current.temperatureC)}°` : "—"}</Text>
-          {data ? <Image source={{ uri: data.current.iconUrl }} style={styles.weatherFeatureIcon} /> : <Ionicons name="partly-sunny-outline" size={38} color={COLORS.navy} />}
-        </View>
-        <Text style={styles.weatherFeatureCondition}>{data ? data.current.condition : "Оновлюємо дані"}</Text>
-      </View>
-    </View>
-    <View style={styles.weatherFeatureAir}>
-      <Ionicons name="leaf-outline" size={21} color={COLORS.green} />
-      <Text style={styles.weatherFeatureAirLabel}>Якість повітря</Text>
-      <Text style={styles.weatherFeatureAirValue}>{airQuality ? airQualityLabel(airQuality.index) : "Оновлюємо"}</Text>
-      <Text style={styles.weatherFeatureAirMeta}>{airQuality ? `PM2.5 ${Math.round(airQuality.pm25)}` : ""}</Text>
-    </View>
-    <Ionicons name="chevron-forward" size={17} color={COLORS.muted} style={styles.weatherFeatureChevron} />
-  </Pressable>;
-}
-
-function AirAlertBanner() {
-  const [data, setData] = useState<AirAlertStatus | null>(null);
-
-  useEffect(() => {
-    void loadStatus();
-    const timer = setInterval(() => void loadStatus(), 60_000);
+    void getWeather().then(setData).catch(() => setData(null)).finally(() => setWeatherLoading(false));
+    void getAirAlertStatus().then(setAlert).catch(() => setAlert(null));
+    const timer = setInterval(() => void getAirAlertStatus().then(setAlert).catch(() => setAlert(null)), 60_000);
     return () => clearInterval(timer);
   }, []);
 
-  async function loadStatus() {
-    try {
-      setData(await getAirAlertStatus());
-    } catch {
-      setData(null);
-    }
-  }
-
-  if (!data || data.state === "UNAVAILABLE") {
-    return null;
-  }
-
-  const state = data.state;
-  const icon = state === "ACTIVE" ? "warning-outline" : "shield-checkmark-outline";
-  return (
-    <Pressable style={[styles.airAlertBanner, state === "ACTIVE" ? styles.airAlertBannerActive : styles.airAlertBannerClear]} onPress={() => void openOfficialLink("https://www.ukrainealarm.com/")}>
-      <View style={[styles.airAlertIcon, state === "ACTIVE" ? styles.airAlertIconActive : styles.airAlertIconClear]}><Ionicons name={icon} size={19} color={state === "ACTIVE" ? "#a31d1d" : COLORS.green} /></View>
-      <View style={styles.airAlertCopy}>
-        <Text style={[styles.airAlertTitle, state === "ACTIVE" && styles.airAlertTitleActive]}>{data.title}</Text>
-        {state === "ACTIVE" ? <Text style={styles.airAlertTextActive}>{data.detail}</Text> : null}
+  const airQuality = data?.current.airQuality;
+  const alertIsActive = alert?.state === "ACTIVE";
+  return <Pressable style={styles.weatherFeatureCard} onPress={onPress}>
+    <View style={styles.weatherFeatureInfo}>
+      <View style={styles.weatherFeatureMain}>
+        <Text style={styles.weatherFeatureLabel}>Погода зараз</Text>
+        <View style={styles.weatherFeatureTemperatureRow}>
+          <Text style={styles.weatherFeatureTemperature}>{data ? `${Math.round(data.current.temperatureC)}°` : "—"}</Text>
+          {data ? <Image source={{ uri: data.current.iconUrl }} style={styles.weatherFeatureIcon} /> : <Ionicons name="partly-sunny-outline" size={31} color={COLORS.navy} />}
+        </View>
+        <Text style={styles.weatherFeatureCondition}>{data ? data.current.condition : weatherLoading ? "Оновлюємо дані" : "Погода недоступна"}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={17} color={state === "ACTIVE" ? "#a31d1d" : COLORS.green} />
-    </Pressable>
-  );
+      <View style={styles.weatherFeatureAir}>
+        <Ionicons name="leaf-outline" size={18} color={COLORS.green} />
+        <Text style={styles.weatherFeatureAirLabel}>Якість повітря</Text>
+        <Text style={styles.weatherFeatureAirValue}>{airQuality ? airQualityLabel(airQuality.index) : weatherLoading ? "Оновлюємо" : "Немає даних"}</Text>
+        <Text style={styles.weatherFeatureAirMeta}>{airQuality ? `PM2.5 ${Math.round(airQuality.pm25)}` : ""}</Text>
+      </View>
+    </View>
+    <View style={[styles.weatherFeatureAlert, alertIsActive ? styles.weatherFeatureAlertActive : alert?.state === "CLEAR" ? styles.weatherFeatureAlertClear : styles.weatherFeatureAlertUnknown]}>
+        <Ionicons name={alertIsActive ? "warning-outline" : alert?.state === "CLEAR" ? "shield-checkmark-outline" : "help-circle-outline"} size={20} color={alertIsActive ? COLORS.danger : alert?.state === "CLEAR" ? COLORS.green : COLORS.muted} />
+      <Text style={[styles.weatherFeatureAlertText, alertIsActive && styles.weatherFeatureAlertTextActive]}>{alertIsActive ? "Тривога" : alert?.state === "CLEAR" ? "Тривоги\nнемає" : "Статус\nневідомий"}</Text>
+    </View>
+  </Pressable>;
 }
 
 function WeatherScreen({ onBack }: { onBack: () => void }) {
@@ -1017,13 +1432,17 @@ function WeatherMetric({ icon, label, value }: { icon: keyof typeof Ionicons.gly
   return <View style={styles.weatherMetric}><Ionicons name={icon} size={16} color="#d3e4ff" /><Text style={styles.weatherMetricLabel}>{label}</Text><Text style={styles.weatherMetricValue}>{value}</Text></View>;
 }
 
-function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
+function NewsScreen({ onChangeTab, onOpenArticle }: { onChangeTab: (tab: RootTab) => void; onOpenArticle: (item: OfficialNewsItem) => void }) {
   const [data, setData] = useState<OfficialNewsList | null>(null);
+  const [alertEvents, setAlertEvents] = useState<AirAlertEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void loadNews();
+    void loadAlertEvents();
+    const timer = setInterval(() => void loadAlertEvents(), 30_000);
+    return () => clearInterval(timer);
   }, []);
 
   async function loadNews() {
@@ -1038,27 +1457,29 @@ function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
     }
   }
 
+  async function loadAlertEvents() {
+    try {
+      setAlertEvents((await getAirAlertEvents()).events);
+    } catch {
+      setAlertEvents([]);
+    }
+  }
+
+  const feedGroups = groupFeedEntriesByDay(data?.items.slice(0, 10) ?? [], alertEvents);
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.simpleTabContent}>
         <CivicHeader onOpenProfile={() => onChangeTab("profile")} />
         <View style={styles.pageIntro}>
-          <View style={styles.eyebrowRow}>
-            <View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} />
-          <Text style={styles.eyebrow}>Офіційний вісник</Text>
-        </View>
           <Text style={styles.pageTitle}>Стрічка</Text>
         </View>
         <Pressable style={styles.newsSourceLine} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
           <Ionicons name="megaphone-outline" size={18} color={COLORS.navy} />
-          <Text style={styles.newsSourceLineText}>Джерело: Ужгородська міська рада</Text>
+          <Text style={styles.newsSourceLineText}>Новини: Ужгородська міська рада</Text>
           <Ionicons name="open-outline" size={16} color={COLORS.navy} />
         </Pressable>
-        <View style={styles.newsListHeading}>
-          <Text style={styles.newsListHeadingTitle}>Останні новини</Text>
-          <Text style={styles.newsListHeadingMeta}>Офіційно</Text>
-        </View>
         {loading && <ActivityIndicator style={styles.inlineLoader} color="#123a63" />}
         {error && (
           <View style={styles.inlineError}>
@@ -1069,20 +1490,21 @@ function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
           </View>
         )}
         {data?.stale && <Text style={styles.staleData}>Показуємо збережену версію стрічки — перевіряємо оновлення.</Text>}
-        {data?.items.slice(0, 10).map((item) => (
-          <Pressable key={item.sourceUrl} style={styles.newsArticleCard} onPress={() => void openOfficialLink(item.sourceUrl)}>
-            <View style={styles.newsArticleTop}>
-              <View style={styles.newsArticleIcon}><Ionicons name="megaphone-outline" size={17} color={COLORS.navy} /></View>
-              <Text style={styles.newsArticleDate}>{item.publishedLabel ?? "Дата не вказана"}</Text>
+        {feedGroups.map(([day, entries]) => <View key={day} style={styles.newsDayGroup}>
+          {day !== "__undated__" ? <Text style={styles.newsDayHeading}>{entries[0].dayLabel}</Text> : null}
+          {entries.map((entry) => entry.kind === "alert" ? <View key={entry.key} style={styles.alertEventCard}>
+            <View style={styles.alertEventIcon}><Ionicons name={entry.event.state === "ACTIVE" ? "warning-outline" : "checkmark-circle-outline"} size={19} color={entry.event.state === "ACTIVE" ? COLORS.danger : COLORS.green} /></View>
+            <View style={styles.alertEventCopy}><Text style={styles.alertEventTitle}>{entry.event.title}</Text><Text style={styles.alertEventText}>{entry.event.detail}</Text></View>
+            <Text style={styles.alertEventTime}>{formatAlertEventTime(entry.event.occurredAt)}</Text>
+          </View> : <Pressable key={entry.key} style={styles.newsArticleCard} onPress={() => onOpenArticle(entry.item)}>
+            <View style={styles.newsArticleCopy}>
+              <Text numberOfLines={3} style={styles.newsArticleTitle}>{entry.item.title}</Text>
+              {day === "__undated__" ? <Text style={styles.newsArticleDate}>Новина міськради</Text> : null}
             </View>
-            <Text numberOfLines={2} style={styles.newsArticleTitle}>{item.title}</Text>
-            <View style={styles.newsArticleAction}>
-              <Text style={styles.newsArticleActionText}>Відкрити на сайті</Text>
-              <Ionicons name="arrow-forward" size={16} color={COLORS.navy} />
-            </View>
-          </Pressable>
-        ))}
-        {!loading && !error && data?.items.length === 0 && <Text style={styles.empty}>Новин поки немає.</Text>}
+            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+          </Pressable>)}
+        </View>)}
+        {!loading && !error && feedGroups.length === 0 && <Text style={styles.empty}>Оновлень поки немає.</Text>}
         {data && data.items.length > 10 ? <Pressable style={styles.newsMoreLink} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
           <Text style={styles.newsMoreLinkText}>Усі новини на сайті міськради</Text>
           <Ionicons name="open-outline" size={16} color={COLORS.navy} />
@@ -1093,54 +1515,102 @@ function NewsScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
   );
 }
 
-function ProfileScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void }) {
+function NewsArticleScreen({ item, backLabel, onBack }: { item: OfficialNewsItem; backLabel: string; onBack: () => void }) {
+  const [article, setArticle] = useState<OfficialNewsArticle | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const swipeBack = useSwipeBack(onBack);
+
+  useEffect(() => {
+    void loadArticle();
+  }, [item.sourceUrl]);
+
+  async function loadArticle() {
+    setLoading(true);
+    setError(null);
+    try {
+      setArticle(await getOfficialNewsArticle(item));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Не вдалося завантажити короткий перегляд новини.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const title = article?.title || item.title;
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.newsReaderContent}>
+      <CivicHeader />
+      <BackLink label={backLabel} onPress={onBack} />
+      <Text style={styles.newsReaderTitle}>{title}</Text>
+      <Text style={styles.newsReaderDate}>Ужгородська міська рада{article?.publishedLabel || item.publishedLabel ? ` · ${article?.publishedLabel ?? item.publishedLabel}` : ""}</Text>
+      {loading ? <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} /> : null}
+      {error ? <View style={styles.inlineError}>
+        <Text style={styles.inlineErrorText}>{error}</Text>
+        <Pressable onPress={() => void loadArticle()}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable>
+      </View> : null}
+      {article?.preview ? <Text style={styles.newsReaderPreviewText}>{article.preview}</Text> : null}
+      {!loading && !error && !article?.preview ? <Text style={styles.newsReaderAttributionText}>Повний текст цієї публікації доступний на сайті міської ради.</Text> : null}
+      <Pressable style={styles.newsReaderOriginalButton} onPress={() => void openOfficialLink(item.sourceUrl)}>
+        <Text style={styles.newsReaderOriginalButtonText}>Повний матеріал на сайті міськради</Text>
+        <Ionicons name="open-outline" size={17} color="#ffffff" />
+      </Pressable>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function ProfileScreen({
+  accountEmail,
+  favoriteSummary,
+  language,
+  isDarkTheme,
+  paymentCard,
+  onOpenLanguage,
+  onOpenNotifications,
+  onOpenAccount,
+  onOpenPaymentMethods,
+  onOpenLegal,
+  onChangeTab,
+}: {
+  accountEmail?: string;
+  favoriteSummary?: string;
+  language: "uk" | "en";
+  isDarkTheme: boolean;
+  paymentCard: DemoPaymentCard | null;
+  onOpenLanguage: () => void;
+  onOpenNotifications: () => void;
+  onOpenAccount: () => void;
+  onOpenPaymentMethods: () => void;
+  onOpenLegal: () => void;
+  onChangeTab: (tab: RootTab) => void;
+}) {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.simpleTabContent}>
         <CivicHeader onOpenNotifications={() => onChangeTab("feed")} />
         <View style={styles.pageIntro}>
-          <View style={styles.eyebrowRow}>
-            <View style={styles.eyebrowDot} />
-            <Text style={styles.eyebrow}>Ваш простір</Text>
-          </View>
           <Text style={styles.pageTitle}>Налаштування</Text>
-          <Text style={styles.pageDescription}>Керуйте тим, як застосунок виглядає та повідомляє важливе.</Text>
-        </View>
-        <View style={styles.profileAppCard}>
-          <View style={styles.profileAppMark}><BrandMark size={44} /></View>
-          <View style={styles.profileAppCopy}>
-            <Text style={styles.profileAppTitle}>Ужгород Поруч</Text>
-            <Text style={styles.profileAppText}>Працює без акаунта. Особисті дані не збираємо.</Text>
-          </View>
-          <View style={styles.profileVersionPill}><Text style={styles.profileVersionText}>v1.0</Text></View>
         </View>
 
-        <Text style={styles.profileSectionTitle}>Налаштування застосунку</Text>
+        <Text style={styles.profileSectionTitle}>Застосунок</Text>
         <View style={styles.profileGroup}>
+          <ProfileRow icon="person-outline" title={accountEmail ? "Ваш акаунт" : "Створити акаунт"} value={accountEmail ? favoriteSummary : "Для збереження вибору"} onPress={onOpenAccount} />
           <ProfileRow
             icon="notifications-outline"
             title="Сповіщення"
-            value="Ще не підключені"
-            onPress={() => Alert.alert("Сповіщення ще не підключені", "Підключимо їх лише через підтверджений офіційний канал. Зокрема, тоді зможемо коректно нагадувати про хвилину мовчання.")}
-          />
-          <ProfileRow icon="language-outline" title="Мова" value="Українська" />
-        </View>
-
-        <Text style={styles.profileSectionTitle}>Доступність</Text>
-        <View style={styles.profileGroup}>
-          <ProfileRow
-            icon="text-outline"
-            title="Розмір тексту"
-            value="Налаштування пристрою"
-            onPress={() => void Linking.openSettings()}
+            value="Керування категоріями"
+            onPress={onOpenNotifications}
           />
           <ProfileRow
-            icon="contrast-outline"
-            title="Високий контраст"
-            value="Налаштування пристрою"
-            onPress={() => void Linking.openSettings()}
+            icon="card-outline"
+            title="Способи оплати"
+            value={paymentCard ? `Картка •••• ${paymentCard.last4}` : "Apple Pay, Google Pay або картка"}
+            onPress={onOpenPaymentMethods}
           />
+          <ProfileRow icon="language-outline" title="Мова / Language" value={language === "uk" ? "Українська" : "English · частково"} onPress={onOpenLanguage} />
+          <ProfileRow icon={isDarkTheme ? "moon-outline" : "sunny-outline"} title="Тема" value={`За системою · ${isDarkTheme ? "темна" : "світла"}`} />
         </View>
 
         <Text style={styles.profileSectionTitle}>Підтримка й інформація</Text>
@@ -1150,15 +1620,12 @@ function ProfileScreen({ onChangeTab }: { onChangeTab: (tab: RootTab) => void })
             icon="information-circle-outline"
             title="Про застосунок"
             value="Версія 1.0"
-            onPress={() => Alert.alert("Ужгород Поруч", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")}
+            onPress={() => Alert.alert("Ужгород Цифровий", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")}
           />
+          <ProfileRow icon="shield-checkmark-outline" title="Правила та приватність" value="Дані, джерела й права користувача" onPress={onOpenLegal} />
         </View>
 
-        <View style={styles.profilePrivacyNote}>
-          <Ionicons name="lock-closed-outline" size={20} color={COLORS.navy} />
-          <Text style={styles.profilePrivacyText}>Базові сервіси не потребують номера авто, платіжних чи інших персональних даних.</Text>
-        </View>
-        <Text style={styles.profileFooter}>Ужгород Поруч · міський застосунок</Text>
+        <Text style={styles.profileFooter}>Базові сервіси доступні без акаунта.</Text>
       </ScrollView>
       <BottomNavigation activeTab="profile" onChangeTab={onChangeTab} />
     </SafeAreaView>
@@ -1177,7 +1644,7 @@ function ProfileRow({
   onPress?: () => void;
 }) {
   return (
-    <Pressable disabled={!onPress} style={styles.profileRow} onPress={onPress}>
+    <Pressable accessibilityLabel={value ? `${title}. ${value}` : title} accessibilityRole={onPress ? "button" : undefined} disabled={!onPress} style={styles.profileRow} onPress={onPress}>
       <View style={styles.profileRowIcon}>
         <Ionicons name={icon} size={20} color={COLORS.navy} />
       </View>
@@ -1185,9 +1652,293 @@ function ProfileRow({
         <Text style={styles.profileRowTitle}>{title}</Text>
         {value ? <Text style={styles.profileRowValue}>{value}</Text> : null}
       </View>
-      <Ionicons name={onPress ? "open-outline" : "chevron-forward"} size={18} color={COLORS.muted} />
+      {onPress ? <Ionicons name={icon === "open-outline" ? "open-outline" : "chevron-forward"} size={18} color={COLORS.muted} /> : null}
     </Pressable>
   );
+}
+
+function PaymentMethodsScreen({
+  accountEmail,
+  card,
+  onBack,
+  onSaveCard,
+  onRemoveCard,
+}: {
+  accountEmail?: string;
+  card: DemoPaymentCard | null;
+  onBack: () => void;
+  onSaveCard: (card: DemoPaymentCard) => void;
+  onRemoveCard: () => void;
+}) {
+  const [last4, setLast4] = useState(card?.last4 ?? "");
+  const [label, setLabel] = useState(card?.label ?? "Особиста картка");
+  const swipeBack = useSwipeBack(onBack);
+  const save = () => {
+    if (last4.length !== 4) {
+      Alert.alert("Вкажіть 4 цифри", "У поточній версії достатньо лише останніх чотирьох цифр картки.");
+      return;
+    }
+    onSaveCard({ last4, label: label.trim() || "Банківська картка" });
+  };
+
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.paymentContent} keyboardShouldPersistTaps="handled">
+      <CivicHeader />
+      <BackLink label="До налаштувань" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Способи оплати</Text>
+      <Text style={styles.settingsPageDescription}>Оберіть спосіб, який буде доступний під час оплати проїзду.</Text>
+
+      <View style={styles.paymentSafetyNote}>
+        <Ionicons name="shield-checkmark-outline" size={19} color={COLORS.navy} />
+        <Text style={styles.paymentSafetyText}>Поки доступний лише попередній перегляд: зберігаємо останні 4 цифри картки в цьому сеансі. Номер, термін дії та код безпеки не вводяться.</Text>
+      </View>
+
+      <Text style={styles.paymentSectionTitle}>Гаманець телефону</Text>
+      <View style={styles.paymentMethod}>
+        <View style={styles.paymentMethodIcon}><Ionicons name="phone-portrait-outline" size={20} color={COLORS.navy} /></View>
+        <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Apple Pay або Google Pay</Text><Text style={styles.paymentMethodText}>Буде доступно на пристроях, де гаманець налаштований.</Text></View>
+        <Ionicons name="checkmark-circle" size={20} color={COLORS.green} />
+      </View>
+
+      <Text style={styles.paymentSectionTitle}>Банківська картка</Text>
+      {card ? <View style={styles.savedPaymentCard}>
+        <View style={styles.savedPaymentCardTop}>
+          <View style={styles.savedPaymentCardIcon}><Ionicons name="card-outline" size={23} color="#ffffff" /></View>
+          <View style={styles.paymentMethodCopy}><Text style={styles.savedPaymentCardLabel}>{card.label}</Text><Text style={styles.savedPaymentCardNumber}>•••• {card.last4}</Text></View>
+          <Ionicons name="checkmark-circle" size={21} color="#dff1da" />
+        </View>
+        <Pressable accessibilityLabel="Видалити картку" accessibilityRole="button" style={styles.removePaymentCardButton} onPress={() => { onRemoveCard(); setLast4(""); }}>
+          <Ionicons name="trash-outline" size={17} color={COLORS.navy} />
+          <Text style={styles.removePaymentCardText}>Видалити картку</Text>
+        </Pressable>
+      </View> : <View style={styles.paymentCardFields}>
+        <Text style={styles.paymentFieldLabel}>Назва картки</Text>
+        <TextInput accessibilityLabel="Назва картки" onChangeText={setLabel} placeholder="Наприклад, Основна" placeholderTextColor={COLORS.muted} value={label} style={styles.paymentCardInput} />
+        <Text style={[styles.paymentFieldLabel, styles.paymentLast4Label]}>Останні 4 цифри картки</Text>
+        <TextInput accessibilityLabel="Останні чотири цифри картки" keyboardType="number-pad" maxLength={4} onChangeText={(value) => setLast4(value.replace(/\D/g, "").slice(0, 4))} placeholder="4242" placeholderTextColor={COLORS.muted} value={last4} style={styles.paymentCardInput} />
+        <Pressable accessibilityLabel="Додати картку" accessibilityRole="button" style={styles.paymentSubmitButton} onPress={save}>
+          <Ionicons name="add-circle-outline" size={19} color="#ffffff" />
+          <Text style={styles.paymentSubmitText}>Додати картку</Text>
+        </Pressable>
+      </View>}
+      <Text style={styles.paymentMethodsFootnote}>{accountEmail ? `Коли підключимо платіжного провайдера, token картки можна буде безпечно прив’язати до ${accountEmail}.` : "У реальній версії для збереженої картки знадобиться акаунт і захищений платіжний провайдер."}</Text>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, onBack }: {
+  account: AccountSession | null;
+  onAuthenticated: (account: AccountSession) => void | Promise<void>;
+  onLogout: () => void;
+  onDeleteAccount: () => void;
+  onBack: () => void;
+}) {
+  const [mode, setMode] = useState<"login" | "register">("register");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordRepeat, setPasswordRepeat] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const swipeBack = useSwipeBack(onBack);
+
+  async function submit() {
+    if (!/^\S+@\S+\.\S+$/.test(email.trim()) || password.length < 10) {
+      setError("Вкажіть коректну пошту та пароль від 10 символів.");
+      return;
+    }
+    if (mode === "register" && password !== passwordRepeat) {
+      setError("Паролі не збігаються. Повторіть пароль ще раз.");
+      return;
+    }
+    setSubmitting(true); setError(null);
+    try {
+      await onAuthenticated(await (mode === "register" ? registerAccount(email, password) : loginAccount(email, password)));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Не вдалося виконати дію.");
+    } finally { setSubmitting(false); }
+  }
+
+  async function updatePassword() {
+    if (!account || currentPassword.length < 10 || newPassword.length < 10) {
+      setError("Вкажіть поточний та новий пароль щонайменше з 10 символів.");
+      return;
+    }
+    setSubmitting(true); setError(null);
+    try {
+      await onAuthenticated(await changeAccountPassword(account.accessToken, currentPassword, newPassword));
+      setCurrentPassword(""); setNewPassword(""); setShowPasswordForm(false);
+      Alert.alert("Пароль змінено", "Сесію оновлено для захисту акаунта.");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Не вдалося змінити пароль.");
+    } finally { setSubmitting(false); }
+  }
+
+  function confirmDelete() {
+    Alert.alert("Видалити акаунт?", "Цю дію не можна скасувати: буде видалено налаштування й обране.", [
+      { text: "Скасувати", style: "cancel" },
+      { text: "Видалити", style: "destructive", onPress: onDeleteAccount },
+    ]);
+  }
+
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.settingsContent} keyboardShouldPersistTaps="handled">
+      <CivicHeader />
+      <BackLink label="До налаштувань" onPress={onBack} />
+      <View style={styles.accountIntro}>
+        <Text style={styles.pageTitle}>{account ? "Акаунт підключено" : "Акаунт"}</Text>
+        {account ? <Text style={styles.accountIntroText}>{account.preferences.email}</Text> : null}
+      </View>
+      {!account && <View style={styles.accountForm}>
+        <View style={styles.accountModeRow}>
+          <Pressable style={[styles.accountMode, mode === "register" && styles.accountModeActive]} onPress={() => { setMode("register"); setError(null); }}><Text style={[styles.accountModeText, mode === "register" && styles.accountModeTextActive]}>Реєстрація</Text></Pressable>
+          <Pressable style={[styles.accountMode, mode === "login" && styles.accountModeActive]} onPress={() => { setMode("login"); setError(null); }}><Text style={[styles.accountModeText, mode === "login" && styles.accountModeTextActive]}>Увійти</Text></Pressable>
+        </View>
+        <Text style={styles.paymentFieldLabel}>Електронна пошта</Text>
+        <TextInput autoCapitalize="none" keyboardType="email-address" onChangeText={setEmail} placeholder="name@example.com" placeholderTextColor={COLORS.muted} value={email} style={styles.paymentCardInput} />
+        <Text style={[styles.paymentFieldLabel, styles.accountPasswordLabel]}>Пароль</Text>
+        <TextInput onChangeText={setPassword} placeholder="Щонайменше 10 символів" placeholderTextColor={COLORS.muted} secureTextEntry value={password} style={styles.paymentCardInput} />
+        {mode === "register" ? <>
+          <Text style={[styles.paymentFieldLabel, styles.accountPasswordLabel]}>Повторіть пароль</Text>
+          <TextInput accessibilityLabel="Повторіть пароль" onChangeText={setPasswordRepeat} placeholder="Введіть пароль ще раз" placeholderTextColor={COLORS.muted} secureTextEntry value={passwordRepeat} style={styles.paymentCardInput} />
+        </> : null}
+        {error ? <Text style={styles.accountError}>{error}</Text> : null}
+        <Pressable disabled={submitting} style={styles.paymentSubmitButton} onPress={() => void submit()}>
+          {submitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.paymentSubmitText}>{mode === "register" ? "Створити акаунт" : "Увійти"}</Text>}
+        </Pressable>
+      </View>}
+      {!account && <Text style={styles.accountFootnote}>Пароль не зберігається у відкритому вигляді.</Text>}
+      {account && <View style={styles.accountForm}>
+        <Text style={styles.settingsPageDescription}>У цьому розділі можна керувати доступом до своїх збережених налаштувань і обраного.</Text>
+        {showPasswordForm ? <>
+          <Text style={styles.paymentFieldLabel}>Поточний пароль</Text>
+          <TextInput accessibilityLabel="Поточний пароль" onChangeText={setCurrentPassword} placeholder="Ваш поточний пароль" placeholderTextColor={COLORS.muted} secureTextEntry value={currentPassword} style={styles.paymentCardInput} />
+          <Text style={[styles.paymentFieldLabel, styles.accountPasswordLabel]}>Новий пароль</Text>
+          <TextInput accessibilityLabel="Новий пароль" onChangeText={setNewPassword} placeholder="Щонайменше 10 символів" placeholderTextColor={COLORS.muted} secureTextEntry value={newPassword} style={styles.paymentCardInput} />
+          {error ? <Text style={styles.accountError}>{error}</Text> : null}
+          <Pressable disabled={submitting} style={styles.paymentSubmitButton} onPress={() => void updatePassword()}>
+            {submitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.paymentSubmitText}>Змінити пароль</Text>}
+          </Pressable>
+        </> : <Pressable accessibilityRole="button" style={styles.accountActionButton} onPress={() => { setError(null); setShowPasswordForm(true); }}><Ionicons name="key-outline" size={19} color={COLORS.navy} /><Text style={styles.accountActionText}>Змінити пароль</Text></Pressable>}
+        <Pressable accessibilityRole="button" style={styles.accountActionButton} onPress={onLogout}><Ionicons name="log-out-outline" size={19} color={COLORS.navy} /><Text style={styles.accountActionText}>Вийти з усіх пристроїв</Text></Pressable>
+        <Pressable accessibilityRole="button" style={styles.accountDeleteButton} onPress={confirmDelete}><Ionicons name="trash-outline" size={19} color={COLORS.danger} /><Text style={styles.accountDeleteText}>Видалити акаунт і дані</Text></Pressable>
+      </View>}
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function LegalScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.settingsContent}>
+      <CivicHeader />
+      <BackLink label="До налаштувань" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Правила та приватність</Text>
+      <Text style={styles.settingsPageDescription}>Коротка версія документів, які мають бути опубліковані за постійним посиланням до запуску в магазинах.</Text>
+
+      <View style={styles.legalCard}>
+        <View style={styles.legalCardHeading}><Ionicons name="shield-checkmark-outline" size={20} color={COLORS.navy} /><Text style={styles.legalCardTitle}>Приватність</Text></View>
+        <Text style={styles.legalCardText}>Без акаунта застосунок не збирає персональні дані. Для акаунта зберігаємо пошту, хеш пароля, технічний хеш сесії, налаштування та обране. Номер картки й CVV застосунок не отримує.</Text>
+        <Text style={styles.legalCardText}>Видалити акаунт і пов’язані з ним дані можна в розділі «Акаунт».</Text>
+      </View>
+
+      <View style={styles.legalCard}>
+        <View style={styles.legalCardHeading}><Ionicons name="document-text-outline" size={20} color={COLORS.navy} /><Text style={styles.legalCardTitle}>Правила користування</Text></View>
+        <Text style={styles.legalCardText}>Інформація про транспорт, безпеку, події та сервіси має довідковий характер. Перед дією у критичній ситуації перевіряйте офіційне джерело; застосунок не замінює екстрені служби.</Text>
+      </View>
+
+      <View style={styles.legalCard}>
+        <View style={styles.legalCardHeading}><Ionicons name="server-outline" size={20} color={COLORS.navy} /><Text style={styles.legalCardTitle}>Джерела та обмеження</Text></View>
+        <Text style={styles.legalCardText}>Кожен сервіс показує джерело там, де воно доступне. Дані сторонніх карт і розкладів можуть оновлюватися із затримкою; до офіційної інтеграції вони не є гарантією актуальності.</Text>
+      </View>
+
+      <Text style={styles.settingsFootnote}>Повні тексти: PRIVACY_POLICY_UK.md, TERMS_OF_USE_UK.md та DATA_SOURCES_AND_LIMITATIONS_UK.md у репозиторії. Перед публікацією додайте назву видавця, контактну адресу та HTTPS-посилання на ці документи.</Text>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function LanguageSettingsScreen({
+  language,
+  onChangeLanguage,
+  onBack,
+}: {
+  language: "uk" | "en";
+  onChangeLanguage: (language: "uk" | "en") => void;
+  onBack: () => void;
+}) {
+  const swipeBack = useSwipeBack(onBack);
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.settingsContent}>
+      <CivicHeader />
+      <BackLink label="До налаштувань" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Мова / Language</Text>
+      <Text style={styles.settingsPageDescription}>Українська доступна повністю. Англійська — лише приклад перемикача.</Text>
+      <View style={styles.settingsCard}>
+        <SettingsChoice icon="text-outline" title="Українська" subtitle="Основна мова інтерфейсу" selected={language === "uk"} onPress={() => onChangeLanguage("uk")} />
+        <SettingsChoice icon="globe-outline" title="English" subtitle="Переклад поступово додається" selected={language === "en"} onPress={() => onChangeLanguage("en")} />
+      </View>
+      <Text style={styles.settingsFootnote}>Повний англійський інтерфейс з’явиться після перекладу всіх екранів.</Text>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function NotificationSettingsScreen({ onBack }: { onBack: () => void }) {
+  const [enabled, setEnabled] = useState({ alert: true, news: true, transport: false, silence: false });
+  const swipeBack = useSwipeBack(onBack);
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.settingsContent}>
+      <CivicHeader />
+      <BackLink label="До налаштувань" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Сповіщення</Text>
+      <Text style={styles.settingsPageDescription}>Оберіть категорії повідомлень.</Text>
+      <View style={styles.settingsSafetyNote}>
+        <Ionicons name="information-circle-outline" size={18} color={COLORS.navy} />
+        <Text style={styles.settingsSafetyText}>Основа для push уже є на сервері. Системний дозвіл і реальна доставка увімкнуться після підключення Apple/Firebase та тесту на фізичних пристроях.</Text>
+      </View>
+      <View style={styles.settingsCard}>
+        <NotificationChoice icon="warning-outline" title="Повітряна тривога та відбій" subtitle="Лише після підтвердження від офіційного джерела" enabled={enabled.alert} onPress={() => setEnabled((value) => ({ ...value, alert: !value.alert }))} />
+        <NotificationChoice icon="megaphone-outline" title="Важливі новини міста" subtitle="Оголошення міськради та критичні зміни" enabled={enabled.news} onPress={() => setEnabled((value) => ({ ...value, news: !value.news }))} />
+        <NotificationChoice icon="bus-outline" title="Зміни у транспорті" subtitle="Скасування, перекриття, важливі зміни маршрутів" enabled={enabled.transport} onPress={() => setEnabled((value) => ({ ...value, transport: !value.transport }))} />
+        <NotificationChoice icon="time-outline" title="Хвилина мовчання" subtitle="Делікатне нагадування о 09:00" enabled={enabled.silence} onPress={() => setEnabled((value) => ({ ...value, silence: !value.silence }))} />
+      </View>
+      <Text style={styles.settingsFootnote}>Для запуску сповіщень потрібні системний дозвіл і підтверджені джерела даних.</Text>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function SettingsChoice({ icon, title, subtitle, selected, onPress }: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="radio" accessibilityState={{ selected }} onPress={onPress} style={[styles.settingsChoice, selected && styles.settingsChoiceActive]}>
+    <View style={styles.settingsChoiceIcon}><Ionicons name={icon} size={20} color={COLORS.navy} /></View>
+    <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{title}</Text><Text style={styles.settingsChoiceText}>{subtitle}</Text></View>
+    <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={21} color={selected ? COLORS.navy : COLORS.muted} />
+  </Pressable>;
+}
+
+function NotificationChoice({ icon, title, subtitle, enabled, onPress }: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  enabled: boolean;
+  onPress: () => void;
+}) {
+  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="switch" accessibilityState={{ checked: enabled }} onPress={onPress} style={styles.settingsChoice}>
+    <View style={styles.settingsChoiceIcon}><Ionicons name={icon} size={20} color={COLORS.navy} /></View>
+    <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{title}</Text><Text style={styles.settingsChoiceText}>{subtitle}</Text></View>
+    <View style={[styles.settingsSwitch, enabled && styles.settingsSwitchOn]}><View style={[styles.settingsSwitchKnob, enabled && styles.settingsSwitchKnobOn]} /></View>
+  </Pressable>;
 }
 
 function MiniaturesScreen({ onBack }: { onBack: () => void }) {
@@ -1293,7 +2044,7 @@ function BottomNavigation({ activeTab, onChangeTab }: { activeTab: RootTab | nul
   ];
   return <View style={styles.bottomNavigation}>{items.map((item) => (
     <Pressable key={item.id} style={styles.tabButton} onPress={() => onChangeTab(item.id)}>
-      <Ionicons name={item.icon} size={21} color={activeTab === item.id ? "#123a63" : "#64748b"} />
+      <Ionicons name={item.icon} size={21} color={activeTab === item.id ? COLORS.navy : COLORS.muted} />
       <Text style={[styles.tabLabel, activeTab === item.id && styles.tabActive]}>{item.label}</Text>
     </Pressable>
   ))}</View>;
@@ -1390,11 +2141,244 @@ function AccessibilityBuildingCard({ building }: { building: AccessibleBuilding 
     : null;
   return (
     <View style={styles.accessibilityCard}>
-      <Text style={styles.accessibilityBuildingName}>{building.name}</Text>
-      <Text style={styles.accessibilityAddress}>{building.address}</Text>
+      <Text style={styles.accessibilityBuildingName}>{displayValue(building.name, "Назва не вказана")}</Text>
+      <Text style={styles.accessibilityAddress}>{displayValue(building.address, "Адреса уточнюється")}</Text>
       {monitoredAt && <Text style={styles.accessibilityDate}>Моніторинг: {monitoredAt}</Text>}
     </View>
   );
+}
+
+function CnapAppointmentDemoScreen({ onBack }: { onBack: () => void }) {
+  const [service, setService] = useState(CNAP_SERVICE_OPTIONS[0]);
+  const [servicePickerOpen, setServicePickerOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [details, setDetails] = useState("");
+  const swipeBack = useSwipeBack(onBack);
+
+  function submitDemo() {
+    if (!details.trim()) {
+      Alert.alert("Додайте опис", "Коротко опишіть запит, щоб переглянути чернетку звернення.");
+      return;
+    }
+    Alert.alert(
+      "Звернення не надіслано",
+      "Форма поки не передає дані до ЦНАП і не зберігає введену інформацію. Після погодження API тут з’явиться безпечне подання звернення та статус опрацювання.",
+    );
+  }
+
+  return (
+    <SafeAreaView {...swipeBack} style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={styles.cnapContent} keyboardShouldPersistTaps="handled">
+        <CivicHeader />
+        <BackLink label="До міських сервісів" onPress={onBack} />
+        <Text style={styles.settingsPageTitle}>Запис до ЦНАП</Text>
+        <Text style={styles.settingsPageDescription}>Чернетка звернення без надсилання даних.</Text>
+
+        <View style={styles.cnapSafetyNote}>
+          <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
+          <Text style={styles.cnapSafetyNoteText}>Форма поки не надсилається. Не вводьте справжні персональні дані.</Text>
+        </View>
+
+        <View style={styles.cnapFormCard}>
+          <Text style={styles.cnapFormTitle}>Дані звернення</Text>
+          <Text style={styles.cnapFieldLabel}>Послуга *</Text>
+          <Pressable accessibilityLabel={`Обрати послугу ЦНАП. Зараз: ${service}`} accessibilityRole="button" style={styles.cnapSelect} onPress={() => setServicePickerOpen((open) => !open)}>
+            <Text style={styles.cnapSelectText}>{service}</Text>
+            <Ionicons name={servicePickerOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.navy} />
+          </Pressable>
+          {servicePickerOpen ? <View style={styles.cnapOptions}>
+            {CNAP_SERVICE_OPTIONS.map((option) => <Pressable
+              key={option}
+              accessibilityLabel={`Обрати послугу: ${option}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: option === service }}
+              onPress={() => { setService(option); setServicePickerOpen(false); }}
+              style={[styles.cnapOption, option === service && styles.cnapOptionActive]}
+            >
+              <Text style={[styles.cnapOptionText, option === service && styles.cnapOptionTextActive]}>{option}</Text>
+              {option === service ? <Ionicons name="checkmark" size={17} color="#ffffff" /> : null}
+            </Pressable>)}
+          </View> : null}
+
+          <Text style={styles.cnapFieldLabel}>Ім’я · необов’язково</Text>
+          <TextInput accessibilityLabel="Ім’я, необов’язково" value={name} onChangeText={setName} placeholder="Ім’я" placeholderTextColor={COLORS.muted} style={styles.cnapInput} />
+          <Text style={styles.cnapFieldLabel}>Контакт · необов’язково</Text>
+          <TextInput accessibilityLabel="Контакт, необов’язково" value={contact} onChangeText={setContact} placeholder="Електронна пошта або телефон" placeholderTextColor={COLORS.muted} style={styles.cnapInput} />
+          <Text style={styles.cnapFieldLabel}>Коротко опишіть запит *</Text>
+          <TextInput accessibilityLabel="Короткий опис запиту, обов’язково" value={details} onChangeText={setDetails} multiline numberOfLines={4} placeholder="Що саме потрібно уточнити?" placeholderTextColor={COLORS.muted} style={[styles.cnapInput, styles.cnapTextarea]} textAlignVertical="top" />
+          <Pressable accessibilityLabel="Переглянути чернетку звернення" accessibilityRole="button" style={styles.cnapSubmitButton} onPress={submitDemo}>
+            <Ionicons name="send-outline" size={18} color="#ffffff" />
+            <Text style={styles.cnapSubmitText}>Переглянути чернетку</Text>
+          </Pressable>
+          <Text style={styles.cnapFormFootnote}>Жодні дані з цієї форми не надходять до ЦНАП.</Text>
+        </View>
+
+        <Pressable accessibilityLabel="Відкрити офіційний кабінет ЦНАП" accessibilityRole="link" style={styles.cnapOfficialLink} onPress={() => void openOfficialLink("https://my.cnap.rada-uzhgorod.gov.ua/")}>
+          <Ionicons name="open-outline" size={18} color={COLORS.navy} />
+          <View style={styles.cnapOfficialLinkCopy}>
+            <Text style={styles.cnapOfficialLinkTitle}>Потрібна послуга вже зараз?</Text>
+            <Text style={styles.cnapOfficialLinkText}>Відкрити офіційний кабінет ЦНАП</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function TransportPaymentDemoScreen({ card, onBack, onManagePaymentMethods }: { card: DemoPaymentCard | null; onBack: () => void; onManagePaymentMethods: () => void }) {
+  const [method, setMethod] = useState<"card" | "wallet">(card ? "card" : "wallet");
+  const [boardingMethod, setBoardingMethod] = useState<"qr" | "number">("qr");
+  const [busReference, setBusReference] = useState("");
+  const [ticketCreated, setTicketCreated] = useState(false);
+  const swipeBack = useSwipeBack(onBack);
+  const busReferenceLabel = busReference.trim();
+  const canContinue = (method === "wallet" || Boolean(card)) && busReferenceLabel.length > 0;
+
+  if (ticketCreated) {
+    return <SafeAreaView {...swipeBack} style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={styles.paymentContent}>
+        <CivicHeader />
+        <BackLink label="До міських сервісів" onPress={onBack} />
+        <View style={styles.paymentSuccessHero}>
+          <Text style={styles.paymentSuccessTitle}>Зразок квитка</Text>
+          <Text style={styles.paymentSuccessText}>Кошти не списано. QR-код не дійсний для проїзду.</Text>
+        </View>
+        <View style={styles.demoTicket}>
+          <View style={styles.demoTicketTop}>
+            <View><Text style={styles.demoTicketLabel}>ЗРАЗОК КВИТКА</Text><Text style={styles.demoTicketTitle}>Разова поїздка · {busReferenceLabel}</Text></View>
+            <Ionicons name="bus-outline" size={27} color={COLORS.navy} />
+          </View>
+          <View style={styles.demoQr}><View style={styles.demoQrInner}><Ionicons name="qr-code-outline" size={66} color={COLORS.navyDark} /></View></View>
+          <View style={styles.demoTicketMeta}><Text style={styles.demoTicketMetaText}>{boardingMethod === "qr" ? "QR у салоні" : "Бортовий номер"}</Text><Text style={styles.demoTicketMetaText}>0,00 ₴</Text></View>
+        </View>
+        <Pressable style={styles.paymentSecondaryButton} onPress={() => setTicketCreated(false)}>
+          <Ionicons name="refresh-outline" size={18} color={COLORS.navy} />
+          <Text style={styles.paymentSecondaryButtonText}>Повернутися до оплати</Text>
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>;
+  }
+
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.paymentContent}>
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Оплата проїзду</Text>
+      <Text style={styles.settingsPageDescription}>Оберіть автобус, а потім спосіб оплати.</Text>
+      <View style={styles.paymentSafetyNote}>
+        <Ionicons name="lock-closed-outline" size={19} color={COLORS.navy} />
+        <Text style={styles.paymentSafetyText}>Оплата ще не підключена: гроші не списуються, квиток не дійсний. Не вводьте дані справжньої картки.</Text>
+      </View>
+      <View style={styles.paymentCard}>
+        <Text style={styles.paymentSectionTitle}>Оберіть автобус</Text>
+        <Pressable accessibilityLabel="Сканувати QR-код у салоні" accessibilityRole="radio" accessibilityState={{ selected: boardingMethod === "qr" }} onPress={() => setBoardingMethod("qr")} style={[styles.paymentMethod, boardingMethod === "qr" && styles.paymentMethodActive]}>
+          <View style={styles.paymentMethodIcon}><Ionicons name="qr-code-outline" size={20} color={COLORS.navy} /></View>
+          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Сканувати QR у салоні</Text><Text style={styles.paymentMethodText}>Код прив'яже квиток до автобуса</Text></View>
+          <Ionicons name={boardingMethod === "qr" ? "radio-button-on" : "radio-button-off"} size={20} color={boardingMethod === "qr" ? COLORS.navy : COLORS.muted} />
+        </Pressable>
+        <Pressable accessibilityLabel="Ввести бортовий номер автобуса" accessibilityRole="radio" accessibilityState={{ selected: boardingMethod === "number" }} onPress={() => setBoardingMethod("number")} style={[styles.paymentMethod, boardingMethod === "number" && styles.paymentMethodActive]}>
+          <View style={styles.paymentMethodIcon}><Ionicons name="bus-outline" size={20} color={COLORS.navy} /></View>
+          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Ввести бортовий номер</Text><Text style={styles.paymentMethodText}>Наприклад, АО… — якщо QR неможливо зчитати</Text></View>
+          <Ionicons name={boardingMethod === "number" ? "radio-button-on" : "radio-button-off"} size={20} color={boardingMethod === "number" ? COLORS.navy : COLORS.muted} />
+        </Pressable>
+        <View style={styles.paymentReferenceBlock}>
+          <Text style={styles.paymentFieldLabel}>{boardingMethod === "qr" ? "Код із QR" : "Бортовий номер"}</Text>
+          <TextInput
+            accessibilityLabel={boardingMethod === "qr" ? "Код із QR" : "Бортовий номер автобуса"}
+            autoCapitalize="characters"
+            onChangeText={(value) => setBusReference(value.toUpperCase())}
+            placeholder={boardingMethod === "qr" ? "Наприклад, UZH-AO123" : "Наприклад, АО123"}
+            placeholderTextColor={COLORS.muted}
+            value={busReference}
+            style={styles.paymentCardInput}
+          />
+          {boardingMethod === "qr" ? <Text style={styles.paymentReferenceHint}>Камеру підключимо разом з оператором оплати. У демо можна ввести код, надрукований поруч із QR.</Text> : null}
+        </View>
+        <Text style={styles.paymentSectionTitle}>Ваш квиток</Text>
+        <View style={styles.paymentTicketChoice}>
+          <View style={styles.paymentTicketIcon}><Ionicons name="bus-outline" size={22} color={COLORS.navy} /></View>
+          <View style={styles.paymentTicketCopy}><Text style={styles.paymentTicketTitle}>Разова поїздка</Text><Text style={styles.paymentTicketText}>{busReferenceLabel ? `Бортовий №: ${busReferenceLabel}` : "Вкажіть автобус вище"}</Text></View>
+          <Text style={styles.paymentTicketPrice}>0,00 ₴</Text>
+        </View>
+        <Text style={styles.paymentSectionTitle}>Спосіб оплати</Text>
+        <Pressable accessibilityLabel="Гаманець телефону: Apple Pay або Google Pay" accessibilityRole="radio" accessibilityState={{ selected: method === "wallet" }} onPress={() => setMethod("wallet")} style={[styles.paymentMethod, method === "wallet" && styles.paymentMethodActive]}>
+          <View style={styles.paymentMethodIcon}><Ionicons name="phone-portrait-outline" size={20} color={COLORS.navy} /></View>
+          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Гаманець телефону</Text><Text style={styles.paymentMethodText}>Apple Pay або Google Pay</Text></View>
+          <Ionicons name={method === "wallet" ? "radio-button-on" : "radio-button-off"} size={20} color={method === "wallet" ? COLORS.navy : COLORS.muted} />
+        </Pressable>
+        <Pressable accessibilityLabel={card ? `Картка, останні цифри ${card.last4}` : "Банківська картка. Додайте картку у профілі"} accessibilityRole="radio" accessibilityState={{ selected: method === "card" }} onPress={() => setMethod("card")} style={[styles.paymentMethod, method === "card" && styles.paymentMethodActive]}>
+          <View style={styles.paymentMethodIcon}><Ionicons name="card-outline" size={20} color={COLORS.navy} /></View>
+          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>{card ? `Картка •••• ${card.last4}` : "Банківська картка"}</Text><Text style={styles.paymentMethodText}>{card ? `${card.label} · додано у профілі` : "Додайте картку у профілі"}</Text></View>
+          <Ionicons name={method === "card" ? "radio-button-on" : "radio-button-off"} size={20} color={method === "card" ? COLORS.navy : COLORS.muted} />
+        </Pressable>
+        {method === "card" && !card ? <Pressable style={styles.paymentAddCardRow} onPress={onManagePaymentMethods}>
+          <Ionicons name="add-circle-outline" size={19} color={COLORS.navy} />
+          <Text style={styles.paymentAddCardText}>Додати картку в профілі</Text>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+        </Pressable> : null}
+        <Pressable disabled={!canContinue} style={[styles.paymentSubmitButton, !canContinue && styles.paymentSubmitButtonDisabled]} onPress={() => canContinue ? setTicketCreated(true) : method === "card" && !card ? onManagePaymentMethods() : undefined}>
+          <Ionicons name="ticket-outline" size={19} color="#ffffff" />
+          <Text style={styles.paymentSubmitText}>{canContinue ? "Показати зразок квитка" : method === "card" && !card ? "Додати картку в профілі" : "Вкажіть автобус"}</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function CityEventsScreen({ onBack }: { onBack: () => void }) {
+  const swipeBack = useSwipeBack(onBack);
+  const [events, setEvents] = useState<CityEvent[]>(CITY_EVENTS);
+
+  useEffect(() => {
+    void getEditorialEvents().then((editorial) => {
+      if (editorial.items.length > 0) setEvents(editorial.items as CityEvent[]);
+    }).catch(() => {
+      // Keep the curated fallback visible if the editorial API is not deployed yet.
+    });
+  }, []);
+
+  const eventsByDay = events.reduce<Map<number, CityEvent[]>>((groups, event) => {
+    groups.set(event.day, [...(groups.get(event.day) ?? []), event]);
+    return groups;
+  }, new Map());
+
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.eventsContent}>
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Події в місті</Text>
+      <Text style={styles.settingsPageDescription}>Афіша Ужгорода на жовтень: концерти, театр, фестивалі й зустрічі.</Text>
+      <View style={styles.eventsSourceNote}>
+        <Ionicons name="information-circle-outline" size={19} color={COLORS.navy} />
+        <Text style={styles.eventsSourceText}>Кожна подія відкриває сторінку продажу квитків або сторінку організатора з повними деталями.</Text>
+      </View>
+      {[...eventsByDay.entries()].map(([day, events]) => <View key={day} style={styles.eventsDayGroup}>
+        <Text style={styles.eventsDayHeading}>{events[0].dateLabel}</Text>
+        <View style={styles.eventsList}>
+          {events.map((event) => <Pressable
+            key={event.id}
+            accessibilityLabel={`${event.title}. ${event.dateLabel}${event.time ? `, ${event.time}` : ""}. ${event.venue}. Відкрити джерело`}
+            accessibilityRole="link"
+            style={styles.eventRow}
+            onPress={() => void openOfficialLink(event.sourceUrl)}
+          >
+            <View style={styles.eventDateBadge}><Text style={styles.eventDateBadgeDay}>{event.day}</Text><Text style={styles.eventDateBadgeMonth}>ЖОВ</Text></View>
+            <View style={styles.eventCopy}>
+              <View style={styles.eventTopLine}><Text numberOfLines={2} style={styles.eventTitle}>{event.title}</Text><Text style={styles.eventCategory}>{event.category}</Text></View>
+              <Text numberOfLines={2} style={styles.eventMeta}>{event.time ? `${event.time} · ` : ""}{event.venue}</Text>
+            </View>
+            <Ionicons name="open-outline" size={17} color={COLORS.muted} />
+          </Pressable>)}
+        </View>
+      </View>)}
+    </ScrollView>
+  </SafeAreaView>;
 }
 
 function ParkingScreen({ onBack }: { onBack: () => void }) {
@@ -1405,68 +2389,120 @@ function ParkingScreen({ onBack }: { onBack: () => void }) {
       <CivicHeader />
       <BackLink label="До міських сервісів" onPress={onBack} />
       <ScrollView contentContainerStyle={styles.parkingContent}>
-        <View style={styles.detailIntro}>
-          <View style={styles.eyebrowRow}>
-            <View style={styles.eyebrowDot} />
-            <Text style={styles.eyebrow}>Офіційні міські сервіси</Text>
-          </View>
-          <Text style={styles.detailTitle}>Паркування в місті</Text>
-          <Text style={styles.detailDescription}>Муніципальна довідка, правила стоянки та перевірені переходи до сервісів для водіїв.</Text>
-        </View>
+        <Text style={styles.settingsPageTitle}>Паркування</Text>
+        <Text style={styles.settingsPageDescription}>Офіційні сервіси для водіїв — без зайвих карток і неперевірених даних.</Text>
 
-        <View style={styles.parkingHero}>
-          <View style={styles.parkingHeroTop}>
-            <View style={styles.parkingHeroIcon}><Ionicons name="car-outline" size={24} color="#f7be3d" /></View>
-            <View style={styles.parkingHeroBadge}><Text style={styles.parkingHeroBadgeText}>ОФІЦІЙНИЙ ДОВІДНИК</Text></View>
-          </View>
-          <Text style={styles.parkingHeroTitle}>Міський реєстр паркування</Text>
-          <Text style={styles.parkingHeroText}>Адреси майданчиків, операторів і тарифи з’являться тут після публікації міського набору даних.</Text>
-        </View>
-        <View style={styles.parkingSectionHeading}>
-          <Text style={styles.sectionLabel}>Дії для водіїв</Text>
-          <View style={styles.officialMark}><Ionicons name="shield-checkmark-outline" size={14} color={COLORS.green} /><Text style={styles.officialMarkText}>Офіційні сервіси</Text></View>
-        </View>
-
-        <Pressable style={styles.parkingActionCard} onPress={() => void openOfficialLink(PARKING_PORTAL_URL)}>
-          <View style={styles.parkingActionHeading}>
+        <View style={styles.parkingActionList}>
+          <Pressable accessibilityLabel="Пошук постанови. Відкрити офіційний сервіс" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_PORTAL_URL)}>
             <View style={styles.parkingActionIcon}><Ionicons name="document-text-outline" size={20} color={COLORS.navy} /></View>
-            <Text style={styles.parkingActionTitle}>Пошук постанови</Text>
+            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Пошук постанови</Text><Text numberOfLines={2} style={styles.parkingActionText}>Деталі постанови та фото в офіційному сервісі міської ради.</Text></View>
             <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </View>
-          <Text style={styles.parkingActionText}>Перевірити деталі постанови та фото можна лише в офіційному сервісі міської ради.</Text>
-          <Text style={styles.parkingActionLink}>Перейти до сервісу</Text>
-        </Pressable>
-
-        <Pressable style={styles.parkingActionCard} onPress={() => void openOfficialLink(PARKING_EVACUATION_URL)}>
-          <View style={styles.parkingActionHeading}>
-            <View style={styles.parkingActionIcon}><Ionicons name="car-outline" size={20} color={COLORS.navy} /></View>
-            <Text style={styles.parkingActionTitle}>Авто евакуювали?</Text>
-            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </View>
-          <Text style={styles.parkingActionText}>Офіційний порядок дій, інформація про зберігання та контакти.</Text>
-          <Text style={styles.parkingActionLink}>Відкрити інструкцію</Text>
-        </Pressable>
-
-        <Pressable style={styles.parkingActionCard} onPress={() => void openOfficialLink(PARKING_INSPECTOR_URL)}>
-          <View style={styles.parkingActionHeading}>
-            <View style={styles.parkingActionIcon}><Ionicons name="call-outline" size={20} color={COLORS.navy} /></View>
-            <Text style={styles.parkingActionTitle}>Контакти інспекторів</Text>
-            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </View>
-          <Text style={styles.parkingActionText}>Повноваження, контакти та офіційні роз’яснення від міста.</Text>
-          <Text style={styles.parkingActionLink}>Відкрити контакти</Text>
-        </Pressable>
-
-        <View style={styles.parkingUnavailable}>
-          <Text style={styles.parkingUnavailableTitle}>Майданчики та тарифи готуються до публікації</Text>
-          <Text style={styles.parkingUnavailableText}>Офіційний набір містить майданчики та операторів, але його файл зараз на модерації. Додамо перелік і тарифи після відкритої публікації, щоб не показувати застарілі адреси чи суми.</Text>
-          <Pressable onPress={() => void openOfficialLink(PARKING_DATASET_URL)}>
-            <Text style={styles.parkingUnavailableLink}>Перевірити стан набору</Text>
           </Pressable>
+          <Pressable accessibilityLabel="Авто евакуювали? Відкрити офіційну інструкцію" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_EVACUATION_URL)}>
+            <View style={styles.parkingActionIcon}><Ionicons name="car-outline" size={20} color={COLORS.navy} /></View>
+            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Авто евакуювали?</Text><Text numberOfLines={2} style={styles.parkingActionText}>Порядок дій, зберігання та контакти.</Text></View>
+            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
+          </Pressable>
+          <Pressable accessibilityLabel="Контакти інспекторів. Відкрити офіційні контакти" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_INSPECTOR_URL)}>
+            <View style={styles.parkingActionIcon}><Ionicons name="call-outline" size={20} color={COLORS.navy} /></View>
+            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Контакти інспекторів</Text><Text numberOfLines={2} style={styles.parkingActionText}>Повноваження, контакти й роз’яснення міста.</Text></View>
+            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
+          </Pressable>
+        </View>
+
+        <View style={styles.parkingInfoNote}>
+          <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
+          <View style={styles.parkingInfoCopy}>
+            <Text style={styles.parkingUnavailableTitle}>Майданчики та тарифи ще не опубліковані</Text>
+            <Text style={styles.parkingUnavailableText}>Додамо їх після відкритої публікації, щоб не показувати застарілі адреси чи суми.</Text>
+            <Pressable accessibilityLabel="Перевірити стан набору даних про паркування" accessibilityRole="link" hitSlop={6} onPress={() => void openOfficialLink(PARKING_DATASET_URL)}>
+              <Text style={styles.parkingUnavailableLink}>Перевірити стан набору</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function PollsScreen({ onBack }: { onBack: () => void }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const options = ["Транспорт і зупинки", "Парки та прогулянки", "Сортування відходів", "Доступність міста"];
+  const swipeBack = useSwipeBack(onBack);
+  return <SafeAreaView {...swipeBack} style={styles.screen}>
+    <StatusBar style="dark" />
+    <ScrollView contentContainerStyle={styles.settingsContent}>
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <Text style={styles.settingsPageTitle}>Опитування</Text>
+      <Text style={styles.pollQuestion}>Що покращити в місті наступним?</Text>
+      <Text style={styles.settingsPageDescription}>Оберіть один варіант, а потім підтвердьте свій вибір.</Text>
+      <View style={styles.settingsCard}>
+        {options.map((option) => <Pressable key={option} accessibilityLabel={`Варіант: ${option}`} accessibilityRole="radio" accessibilityState={{ selected: selected === option }} onPress={() => { setSelected(option); setSubmitted(false); }} style={[styles.pollOption, selected === option && styles.settingsChoiceActive]}>
+          <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{option}</Text></View>
+          <Ionicons name={selected === option ? "radio-button-on" : "radio-button-off"} size={21} color={selected === option ? COLORS.navy : COLORS.muted} />
+        </Pressable>)}
+      </View>
+      <Pressable accessibilityLabel={submitted ? "Вибір підтверджено" : "Проголосувати"} accessibilityRole="button" accessibilityState={{ disabled: !selected || submitted }} disabled={!selected || submitted} style={[styles.paymentSubmitButton, (!selected || submitted) && styles.paymentSubmitButtonDisabled]} onPress={() => setSubmitted(true)}>
+        <Ionicons name={submitted ? "checkmark-circle-outline" : "checkmark-outline"} size={19} color="#ffffff" />
+        <Text style={styles.paymentSubmitText}>{submitted ? "Вибір підтверджено" : "Проголосувати"}</Text>
+      </Pressable>
+      {selected ? <View style={styles.pollResult}><Ionicons name={submitted ? "checkmark-circle-outline" : "information-circle-outline"} size={20} color={COLORS.navy} /><Text style={styles.pollResultText}>{submitted ? `Ваш вибір «${selected}» підтверджено на цьому пристрої.` : `Ви обрали: «${selected}». Натисніть «Проголосувати», щоб підтвердити вибір.`}</Text></View> : null}
+    </ScrollView>
+  </SafeAreaView>;
+}
+
+function SafetyMapScreen({ kind, onBack }: { kind: "shelters" | "resilience"; onBack: () => void }) {
+  const [points, setPoints] = useState<SafetyMapPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const swipeBack = useSwipeBack(onBack);
+  const isShelters = kind === "shelters";
+  const title = isShelters ? "Укриття" : "Пункти незламності";
+  const sourceLabel = isShelters ? "Джерело: Геопортал Ужгородської міської ради" : "Адреси з останнього оприлюдненого переліку";
+  const sourceUrl = isShelters
+    ? "https://geo.rada-uzhgorod.gov.ua/map/shelter#/16:22.290283,48.608131:0.00:0.00?baseLayer=osmb&layers=3317996270789854695"
+    : "https://nezlamnist.gov.ua/";
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    getSafetyMapPoints(kind)
+      .then((response) => {
+        if (mounted) setPoints(response.points);
+      })
+      .catch((requestError) => {
+        if (mounted) setError(requestError instanceof Error ? requestError.message : "Не вдалося завантажити позначки.");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [kind]);
+
+  return <SafeAreaView {...swipeBack} style={styles.cityMapScreen}>
+    <StatusBar style="dark" />
+    <View style={styles.cityMapHeader}>
+      <CivicHeader />
+      <BackLink label="До міських сервісів" onPress={onBack} />
+      <Text style={styles.cityMapTitle}>{title}</Text>
+      <Text style={styles.cityMapHint}>{loading ? "Завантажуємо позначки…" : error ? "Позначки тимчасово недоступні" : `${points.length} позначок на мапі`}</Text>
+    </View>
+    <View style={styles.cityMapCanvas}>
+      <OfficialLayerMap
+        tileTemplate={isShelters ? "https://geo.rada-uzhgorod.gov.ua/map/rtile/3317996270789854695/ua/{z}/{x}/{y}.png" : undefined}
+        points={points}
+        pinColor={isShelters ? "#c2410c" : "#1d4ed8"}
+      />
+    </View>
+    <Pressable style={styles.cityMapSource} onPress={() => void openOfficialLink(sourceUrl)}>
+      <Ionicons name="information-circle-outline" size={17} color={COLORS.navy} />
+      <Text style={styles.cityMapSourceText}>{sourceLabel}{!isShelters ? ". Перед виходом перевірте, чи пункт розгорнули." : ""}</Text>
+      <Ionicons name="open-outline" size={16} color={COLORS.navy} />
+    </Pressable>
+  </SafeAreaView>;
 }
 
 function CityServiceDetails({ service, onBack }: { service: CityService; onBack: () => void }) {
@@ -1656,33 +2692,54 @@ function TransportEmptyState({
   );
 }
 
+function FavoriteButton({ selected, onPress }: { selected: boolean; onPress: () => void }) {
+  return <Pressable
+    accessibilityLabel={selected ? "Прибрати з обраного" : "Додати до обраного"}
+    accessibilityRole="button"
+    accessibilityState={{ selected }}
+    onPress={(event) => { event.stopPropagation(); onPress(); }}
+    style={styles.favoriteButton}
+  >
+    <Ionicons name={selected ? "star" : "star-outline"} size={20} color={selected ? COLORS.gold : COLORS.navy} />
+  </Pressable>;
+}
+
 function StopDetails({
   stopScreen,
+  isFavorite,
   onBack,
   onOpenRoute,
+  onToggleFavorite,
 }: {
   stopScreen: StopScreen;
+  isFavorite: boolean;
   onBack: () => void;
   onOpenRoute: (route: TransportRoute) => void;
+  onToggleFavorite: () => void;
 }) {
   const swipeBack = useSwipeBack(onBack);
   return (
-    <SafeAreaView {...swipeBack} style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.transportDetailScreen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label="До зупинок" onPress={onBack} />
-      <Text style={styles.stopDetailsTitle}>{stopScreen.stop.name}</Text>
+      <View style={styles.stopDetailsHeading}>
+        <Text style={styles.stopDetailsTitle}>{stopDisplayName(stopScreen.stop.name)}</Text>
+        <FavoriteButton selected={isFavorite} onPress={onToggleFavorite} />
+      </View>
+      {stopDisplayCode(stopScreen.stop.name) ? <Text style={styles.stopDetailsCode}>Зупинка №{stopDisplayCode(stopScreen.stop.name)}</Text> : null}
       <Text style={styles.stopDetailsSubtitle}>Маршрути, що проходять через цю зупинку</Text>
       <FlatList
         data={stopScreen.routes}
         keyExtractor={(route) => route.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={styles.stopDetailsList}
         renderItem={({ item }) => (
-          <Pressable style={styles.routeCard} onPress={() => onOpenRoute(item)}>
+          <Pressable accessibilityLabel={`Маршрут ${item.routeNumber}: ${item.name}`} accessibilityRole="button" style={styles.routeCard} onPress={() => onOpenRoute(item)}>
             <View style={styles.routeBadge}>
               <Text style={styles.routeBadgeText}>{item.routeNumber}</Text>
             </View>
-            <Text style={styles.routeName}>{item.name}</Text>
+            <Text numberOfLines={2} style={styles.routeName}>{item.name}</Text>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
           </Pressable>
         )}
         ListEmptyComponent={<Text style={styles.empty}>Для цієї зупинки маршрутів поки немає.</Text>}
@@ -1694,15 +2751,19 @@ function StopDetails({
 function RouteDetails({
   route,
   map,
+  favoriteStopIds,
   onBack,
   onSelectStop,
   onOpenMap,
+  onToggleFavoriteStop,
 }: {
   route: TransportRouteDetails;
   map: TransportRouteMap | null;
+  favoriteStopIds: string[];
   onBack: () => void;
   onSelectStop: (stop: TransportStop) => void;
   onOpenMap: (variantId?: string) => void;
+  onToggleFavoriteStop: (stopId: string) => void;
 }) {
   const termini = getRouteTermini(route);
   const variants = route.variants.filter((variant) => variant.stops.length > 0);
@@ -1724,7 +2785,7 @@ function RouteDetails({
         <View style={styles.routeDetailHero}>
           <View style={styles.routeDetailTopLine}>
             <View style={styles.routeDetailRouteIdentity}>
-              <Text style={styles.routeDetailRouteLabel}>МАРШРУТ</Text>
+              <Text style={styles.routeDetailRouteLabel}>№</Text>
               <View style={styles.routeDetailRouteBadge}>
                 <Text style={styles.routeDetailRouteNumber}>{route.routeNumber}</Text>
               </View>
@@ -1736,13 +2797,9 @@ function RouteDetails({
           </View>
           <Text style={styles.routeDetailTitle}>{route.name}</Text>
           {termini && <Text style={styles.routeDetailTermini}>{termini}</Text>}
-          <View style={styles.routeDetailSource}>
-            <Ionicons name="checkmark-circle-outline" size={16} color="#d3e4ff" />
-            <Text style={styles.routeDetailSourceText}>Маршрут і зупинки з офіційного набору GTFS</Text>
-          </View>
         </View>
         {map && (
-          <Pressable style={styles.routeMapPreview} onPress={() => onOpenMap(direction?.id)}>
+          <Pressable accessibilityLabel="Відкрити карту маршруту" accessibilityRole="button" style={styles.routeMapPreview} onPress={() => onOpenMap(direction?.id)}>
             <RouteMap
               activeVariantId={direction?.id}
               map={map}
@@ -1755,11 +2812,11 @@ function RouteDetails({
             </View>
           </Pressable>
         )}
-        <Pressable style={styles.mapButton} onPress={() => onOpenMap(direction?.id)}>
+        {!map && <Pressable accessibilityLabel="Показати маршрут на карті" accessibilityRole="button" style={styles.mapButton} onPress={() => onOpenMap(direction?.id)}>
           <Ionicons name="map-outline" size={18} color={COLORS.navy} />
           <Text style={styles.mapButtonText}>{map ? "Відкрити карту маршруту" : "Показати маршрут на карті"}</Text>
           <Ionicons name="chevron-forward" size={16} color={COLORS.navy} />
-        </Pressable>
+        </Pressable>}
         <View style={styles.stopsIntro}>
           <View>
             <Text style={styles.stopsHeading}>Зупинки на лінії</Text>
@@ -1780,7 +2837,8 @@ function RouteDetails({
               style={styles.directionSwitchButton}
               onPress={() => setDirectionIndex((index) => (index + 1) % variants.length)}
             >
-              <Ionicons name="swap-horizontal-outline" size={21} color={COLORS.navy} />
+                  <Ionicons name="swap-horizontal-outline" size={21} color={COLORS.navy} />
+              <Text style={styles.directionButtonText}>Змінити</Text>
             </Pressable> : null}
           </View>
           <View style={styles.variant}>
@@ -1790,7 +2848,8 @@ function RouteDetails({
                   <View style={[styles.stopDot, index === 0 && styles.stopDotStart, index === direction.stops.length - 1 && styles.stopDotEnd]} />
                   {index < direction.stops.length - 1 && <View style={styles.stopLine} />}
                 </View>
-                <Text style={styles.stopName}>{stop.name}</Text>
+                <Text style={styles.stopName}>{stopDisplayName(stop.name)}</Text>
+                <FavoriteButton selected={favoriteStopIds.includes(stop.id)} onPress={() => onToggleFavoriteStop(stop.id)} />
                 <View style={styles.stopScheduleLink}>
                   <Text style={styles.stopSchedule}>Розклад</Text>
                   <Ionicons name="chevron-forward" size={14} color={COLORS.navy} />
@@ -1879,11 +2938,9 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
     <SafeAreaView style={styles.mapScreen}>
       <StatusBar style="dark" />
       <View style={styles.mapHeader}>
-        <Pressable onPress={onBack}>
-          <Text style={styles.back}>← До маршруту {mapScreen.route.routeNumber}</Text>
-        </Pressable>
+        <BackLink label={`До маршруту ${mapScreen.route.routeNumber}`} onPress={onBack} />
         <Text style={styles.mapTitle}>{mapScreen.route.name}</Text>
-        <Text style={styles.mapHint}>Оберіть зупинку, щоб побачити її плановий час.</Text>
+        <Text style={styles.mapHint}>Натисніть зупинку, щоб побачити розклад.</Text>
       </View>
       {direction ? <View style={styles.mapDirectionSwitch}>
         <View style={styles.mapDirectionCopy}>
@@ -1896,6 +2953,7 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           onPress={changeDirection}
         >
           <Ionicons name="swap-horizontal-outline" size={21} color={COLORS.navy} />
+          <Text style={styles.directionButtonText}>Змінити</Text>
         </Pressable> : null}
       </View> : null}
       <View style={styles.mapCanvas}>
@@ -1908,21 +2966,23 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           vehicles={vehiclePositions?.vehicles}
           onStopPress={(stop) => void selectStop(stop)}
         />
-        {vehiclePositions ? <View style={styles.mapGpsStatus}>
+        {vehiclePositions ? <View pointerEvents="none" style={styles.mapGpsStatus}>
           <View style={[styles.mapGpsDot, vehiclePositions.available ? (vehiclePositions.stale ? styles.mapGpsDotStale : styles.mapGpsDotLive) : styles.mapGpsDotOffline]} />
           <Text style={styles.mapGpsStatusText}>
             {vehiclePositions.available
               ? (vehiclePositions.stale
-                ? "GPS тимчасово без оновлення"
-                : `Онлайн GPS · ${vehiclePositions.vehicles.length} ${pluralizeBus(vehiclePositions.vehicles.length)}`)
-              : "Онлайн GPS зараз недоступний"}
+                ? "GPS: дані застаріли"
+                : vehiclePositions.vehicles.length > 0
+                  ? `GPS · ${vehiclePositions.vehicles.length} ${pluralizeBus(vehiclePositions.vehicles.length)}`
+                  : "GPS · автобусів немає")
+              : "GPS недоступний"}
           </Text>
         </View> : null}
         {selectedStop ? <View style={[styles.mapStopCard, vehiclePositions && styles.mapStopCardWithGps]}>
           <View style={styles.mapStopCardTop}>
             <View style={styles.mapStopIcon}><Ionicons name="bus-outline" size={18} color={COLORS.navy} /></View>
             <View style={styles.mapStopCopy}>
-              <Text numberOfLines={2} style={styles.mapStopName}>{selectedStop.name}</Text>
+              <Text numberOfLines={2} style={styles.mapStopName}>{stopDisplayName(selectedStop.name)}</Text>
               <Text numberOfLines={1} style={styles.mapStopDirection}>До {destination || direction?.name || "кінцевої"}</Text>
             </View>
           </View>
@@ -2000,20 +3060,21 @@ function ScheduleDetails({
   const readableDate = new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long" })
     .format(new Date(`${schedule.date}T12:00:00`));
   return (
-    <SafeAreaView {...swipeBack} style={styles.screen}>
+    <SafeAreaView {...swipeBack} style={styles.transportDetailScreen}>
       <StatusBar style="dark" />
       <CivicHeader />
       <BackLink label={`До зупинок маршруту ${schedule.route.routeNumber}`} onPress={onBack} />
-      <Text style={styles.scheduleTitle}>{schedule.stop.name}</Text>
+      <Text style={styles.scheduleTitle}>{stopDisplayName(schedule.stop.name)}</Text>
+      {stopDisplayCode(schedule.stop.name) ? <Text style={styles.stopDetailsCode}>Зупинка №{stopDisplayCode(schedule.stop.name)}</Text> : null}
       <View style={styles.dateControls}>
-        <Pressable style={styles.dateButton} onPress={() => onChangeDate(addDays(schedule.date, -1))}>
+        <Pressable accessibilityLabel="Попередня дата" accessibilityRole="button" hitSlop={2} style={styles.dateButton} onPress={() => onChangeDate(addDays(schedule.date, -1))}>
           <Text style={styles.dateButtonText}>←</Text>
         </Pressable>
         <View>
           <Text style={styles.scheduleSubtitle}>Планові відправлення на</Text>
           <Text style={styles.selectedDate}>{readableDate}</Text>
         </View>
-        <Pressable style={styles.dateButton} onPress={() => onChangeDate(addDays(schedule.date, 1))}>
+        <Pressable accessibilityLabel="Наступна дата" accessibilityRole="button" hitSlop={2} style={styles.dateButton} onPress={() => onChangeDate(addDays(schedule.date, 1))}>
           <Text style={styles.dateButtonText}>→</Text>
         </Pressable>
       </View>
@@ -2063,6 +3124,70 @@ function formatUpdatedAt(value: string) {
 
 function formatDateOnly(value: string) {
   return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
+}
+
+type FeedEntry = {
+  key: string;
+  dayLabel: string;
+  timestamp: number;
+} & ({ kind: "news"; item: OfficialNewsItem } | { kind: "alert"; event: AirAlertEvent });
+
+const UKRAINIAN_MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"];
+
+function parseNewsDate(label: string | null): Date | null {
+  const match = label?.trim().toLowerCase().match(/^([а-яіїєґ]+)\s+(\d{1,2}),\s*(\d{4})$/u);
+  if (!match) return null;
+  const month = UKRAINIAN_MONTHS.indexOf(match[1]);
+  if (month < 0) return null;
+  const date = new Date(Number(match[3]), month, Number(match[2]));
+  return date.getMonth() === month && date.getDate() === Number(match[2]) ? date : null;
+}
+
+function feedDayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function groupFeedEntriesByDay(items: OfficialNewsItem[], events: AirAlertEvent[]): Array<[string, FeedEntry[]]> {
+  const groups = new Map<string, FeedEntry[]>();
+  const add = (day: string, entry: FeedEntry) => groups.set(day, [...(groups.get(day) ?? []), entry]);
+  const labelFor = (date: Date) => new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(date);
+
+  for (const item of items) {
+    const date = parseNewsDate(item.publishedLabel);
+    add(date ? feedDayKey(date) : "__undated__", {
+      kind: "news", item, key: item.sourceUrl,
+      dayLabel: date ? labelFor(date) : "",
+      timestamp: date?.getTime() ?? 0,
+    });
+  }
+  for (const event of events) {
+    const date = new Date(event.occurredAt);
+    if (!Number.isFinite(date.getTime())) continue;
+    add(feedDayKey(date), {
+      kind: "alert", event, key: `${event.state}-${event.occurredAt}`,
+      dayLabel: labelFor(date), timestamp: date.getTime(),
+    });
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => left === "__undated__" ? 1 : right === "__undated__" ? -1 : right.localeCompare(left))
+    .map(([day, entries]) => [day, entries.sort((left, right) => right.timestamp - left.timestamp)]);
+}
+
+function formatAlertEventTime(value: string) {
+  return new Intl.DateTimeFormat("uk-UA", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+}
+
+function displayValue(value: string | null | undefined, fallback: string) {
+  const normalized = value?.replace(/\bnull\b/gi, "").replace(/\s+/g, " ").replace(/\s+,/g, ",").trim();
+  return normalized && normalized.toLowerCase() !== "null" ? normalized : fallback;
+}
+
+function stopDisplayCode(name: string): string | null {
+  return name.match(/\s*\((\d+)\)\s*$/)?.[1] ?? null;
+}
+
+function stopDisplayName(name: string): string {
+  return name.replace(/\s*\(\d+\)\s*$/, "").trim();
 }
 
 function formatDashboardDate() {
@@ -2145,16 +3270,15 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
   );
 }
 
-const styles = StyleSheet.create({
+const STYLE_DEFINITIONS = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f6f7fb", paddingHorizontal: 16 },
   transportScreen: { flex: 1, backgroundColor: "#f6f7fb" },
   transportContent: { paddingHorizontal: 20 },
+  transportScrollContent: { flexGrow: 1, paddingBottom: 22 },
   centered: { alignItems: "center", justifyContent: "center" },
   civicHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 58, paddingTop: 4 },
   brandGroup: { alignItems: "center", flexDirection: "row", gap: 8 },
-  brandMark: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, height: 34, justifyContent: "center", width: 34 },
-  brandMarkText: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 16 },
-  brandMarkAccent: { backgroundColor: COLORS.gold, bottom: 5, position: "absolute", right: 5 },
+  brandMark: { backgroundColor: COLORS.navy, height: 34, width: 34 },
   brandIntroScreen: { alignItems: "center", backgroundColor: "#f6f7fb", flex: 1, justifyContent: "center", paddingHorizontal: 20 },
   brandIntroContent: { alignItems: "center", marginTop: -38 },
   brandIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, letterSpacing: -0.5, marginTop: 19 },
@@ -2162,10 +3286,10 @@ const styles = StyleSheet.create({
   brandIntroFooter: { alignItems: "center", bottom: 42, flexDirection: "row", gap: 8, position: "absolute" },
   brandIntroFooterText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
   brandTitleRow: { alignItems: "center", flexDirection: "row", gap: 6 },
-  brandTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17, lineHeight: 20 },
+  brandTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, lineHeight: 20 },
   brandSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 1 },
   headerDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
-  backLink: { alignItems: "center", flexDirection: "row", gap: 2, marginTop: 5, minHeight: 32 },
+  backLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, marginTop: 5, minHeight: 44, paddingRight: 10 },
   backLinkText: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 13 },
   pageIntro: { marginTop: 15 },
   eyebrowRow: { alignItems: "center", flexDirection: "row", gap: 6 },
@@ -2195,9 +3319,9 @@ const styles = StyleSheet.create({
   serviceGroupHeading: { marginBottom: 10 },
   serviceGroupTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17 },
   serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
-  serviceGridCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, justifyContent: "space-between", minHeight: 122, padding: 13, width: "48.4%" },
-  serviceGridIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
-  serviceGridFooter: { alignItems: "flex-end", flexDirection: "row", gap: 4, justifyContent: "space-between", marginTop: 14 },
+  serviceGridCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, justifyContent: "space-between", minHeight: 90, padding: 11, width: "48.4%" },
+  serviceGridIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 34, justifyContent: "center", width: 34 },
+  serviceGridFooter: { alignItems: "flex-end", flexDirection: "row", gap: 4, justifyContent: "space-between", marginTop: 7 },
   serviceGridTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
   officialMark: { alignItems: "center", flexDirection: "row", gap: 4 },
   officialMarkText: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
@@ -2217,7 +3341,7 @@ const styles = StyleSheet.create({
   profileAppText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 4 },
   profileVersionPill: { alignSelf: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 6, marginTop: 8, paddingHorizontal: 6, paddingVertical: 3 },
   profileVersionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10 },
-  profileSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 26 },
+  profileSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 20 },
   profileGroup: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 10, overflow: "hidden" },
   profileRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 67, paddingHorizontal: 13 },
   profileRowIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 36, justifyContent: "center", width: 36 },
@@ -2230,27 +3354,132 @@ const styles = StyleSheet.create({
   profileNoticeCopy: { flex: 1 },
   profileNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
   profileNoticeText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  profileFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 22, textAlign: "center" },
+  profileFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 22, textAlign: "center" },
+  settingsContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  accountIntro: { marginTop: 13 },
+  accountIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
+  accountForm: { marginTop: 22 },
+  accountActionButton: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 10, minHeight: 50, paddingHorizontal: 14 },
+  accountActionText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
+  accountDeleteButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 10, minHeight: 50, paddingHorizontal: 14 },
+  accountDeleteText: { color: COLORS.danger, fontFamily: FONTS.semibold, fontSize: 13 },
+  accountFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 13, textAlign: "center" },
+  settingsPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31, marginTop: 18 },
+  settingsPageDescription: { color: "#485768", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 5 },
+  legalCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 14, padding: 14 },
+  legalCardHeading: { alignItems: "center", flexDirection: "row", gap: 8 },
+  legalCardTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15 },
+  legalCardText: { color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  pollQuestion: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 18, lineHeight: 25, marginTop: 18 },
+  pollOption: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 66, paddingHorizontal: 15 },
+  settingsHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
+  settingsHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
+  settingsHeroKicker: { color: "#f4c65b", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.7, marginTop: 16 },
+  settingsHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 5 },
+  settingsHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  settingsCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 16, borderWidth: 1, marginTop: 13, overflow: "hidden" },
+  settingsChoice: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 74, paddingHorizontal: 13 },
+  settingsChoiceActive: { backgroundColor: COLORS.blueSurface },
+  settingsChoiceIcon: { alignItems: "center", borderRadius: 10, height: 32, justifyContent: "center", width: 32 },
+  settingsChoiceCopy: { flex: 1 },
+  settingsChoiceTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
+  settingsChoiceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  settingsInfoNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 13, padding: 13 },
+  settingsInfoText: { color: "#40546b", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  settingsSafetyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 9, marginTop: 14, padding: 11 },
+  settingsSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  settingsSwitch: { backgroundColor: COLORS.blueSoft, borderColor: COLORS.controlBorder, borderRadius: 15, borderWidth: 1, height: 28, padding: 2, width: 48 },
+  settingsSwitchOn: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
+  settingsSwitchKnob: { backgroundColor: "#ffffff", borderRadius: 11, height: 22, width: 22 },
+  settingsSwitchKnobOn: { alignSelf: "flex-end" },
+  settingsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginHorizontal: 4, marginTop: 16 },
+  cnapContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  cnapHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
+  cnapHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  cnapHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
+  cnapDemoBadge: { backgroundColor: "rgba(247,190,61,0.15)", borderColor: "rgba(247,190,61,0.38)", borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 5 },
+  cnapDemoBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.6 },
+  cnapHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 17 },
+  cnapHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  cnapSafetyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
+  cnapSafetyNoteText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  cnapFormCard: { marginTop: 18 },
+  cnapFormTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17, marginBottom: 4 },
+  cnapFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 12, marginTop: 16 },
+  cnapSelect: { alignItems: "center", backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 6, minHeight: 52, paddingHorizontal: 16 },
+  cnapSelectText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13, paddingRight: 8 },
+  cnapOptions: { borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, marginTop: 6, overflow: "hidden" },
+  cnapOption: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 45, paddingHorizontal: 12 },
+  cnapOptionActive: { backgroundColor: COLORS.navy },
+  cnapOptionText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 12, paddingRight: 8 },
+  cnapOptionTextActive: { color: "#ffffff", fontFamily: FONTS.medium },
+  cnapInput: { backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 13, marginTop: 6, minHeight: 52, paddingHorizontal: 16, paddingVertical: 11 },
+  cnapTextarea: { minHeight: 96, paddingTop: 11 },
+  cnapSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 18, minHeight: 49, paddingHorizontal: 14 },
+  cnapSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  cnapFormFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 11 },
+  cnapOfficialLink: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 13, padding: 13 },
+  cnapOfficialLinkCopy: { flex: 1 },
+  cnapOfficialLinkTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13 },
+  cnapOfficialLinkText: { color: COLORS.navy, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
   newsSourceLine: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, marginTop: 16, paddingVertical: 5 },
   newsSourceLineText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  feedAlertCard: { alignItems: "flex-start", borderRadius: 14, flexDirection: "row", gap: 10, marginTop: 12, padding: 13 },
+  feedAlertCardClear: { backgroundColor: "#eef8eb", borderColor: "#d7ead0", borderWidth: 1 },
+  feedAlertCardActive: { backgroundColor: "#fff4f3", borderColor: "#f0b5b0", borderWidth: 1 },
+  feedAlertIcon: { alignItems: "center", borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
+  feedAlertIconClear: { backgroundColor: "#dff1da" },
+  feedAlertIconActive: { backgroundColor: "#ffe3e0" },
+  feedAlertCopy: { flex: 1 },
+  feedAlertKicker: { color: COLORS.green, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.45 },
+  feedAlertKickerActive: { color: "#a31d1d" },
+  feedAlertTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  feedAlertTitleActive: { color: "#8e1b1b" },
+  feedAlertText: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  feedAlertTextActive: { color: "#a54943" },
+  feedAlertTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 5 },
+  feedAlertStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 10, lineHeight: 15, marginTop: 5 },
+  alertEventCard: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 9, minHeight: 66, paddingVertical: 11 },
+  alertEventCardActive: {},
+  alertEventCardClear: {},
+  alertEventIcon: { alignItems: "center", height: 28, justifyContent: "center", width: 28 },
+  alertEventCopy: { flex: 1 },
+  alertEventTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13 },
+  alertEventText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  alertEventTime: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 11 },
   newsListHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
   newsListHeadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19 },
   newsListHeadingMeta: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
-  newsArticleCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 14 },
+  newsDayGroup: { marginTop: 14 },
+  newsDayHeading: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 12, marginBottom: 1, textTransform: "uppercase" },
+  newsArticleCard: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 76, paddingVertical: 12 },
+  newsArticleCopy: { flex: 1 },
   newsArticleTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   newsArticleIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
-  newsArticleDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
-  newsArticleTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 21, marginTop: 12 },
+  newsArticleDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 5 },
+  newsArticleTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 20 },
   newsArticleAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 6, marginTop: 12 },
   newsArticleActionText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
   newsMoreLink: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: 6, marginTop: 18, paddingVertical: 7 },
   newsMoreLinkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  newsReaderContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  newsReaderKicker: { alignItems: "center", alignSelf: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 8, flexDirection: "row", gap: 6, marginTop: 16, paddingHorizontal: 8, paddingVertical: 6 },
+  newsReaderKickerText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.45 },
+  newsReaderTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 33, marginTop: 20 },
+  newsReaderDate: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 7 },
+  newsReaderPreview: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 19, padding: 15 },
+  newsReaderPreviewLabel: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.65 },
+  newsReaderPreviewText: { color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 15, lineHeight: 24, marginTop: 22 },
+  newsReaderAttribution: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 13, padding: 13 },
+  newsReaderAttributionText: { color: COLORS.muted, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 18 },
+  newsReaderOriginalButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 14, minHeight: 49, paddingHorizontal: 14 },
+  newsReaderOriginalButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
   transportPageTitleRow: { alignItems: "flex-start", flexDirection: "row", gap: 10, justifyContent: "space-between", marginTop: 4 },
   transportPageTitleCopy: { flex: 1 },
   transportPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 22, lineHeight: 28 },
   transportPageDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3, maxWidth: 235 },
-  transportPlanMark: { alignItems: "center", backgroundColor: "#fff8e9", borderRadius: 12, flexDirection: "row", gap: 5, marginTop: 3, paddingHorizontal: 8, paddingVertical: 5 },
-  transportPlanMarkAvailable: { backgroundColor: "#e8f7e4" },
+  transportPlanMark: { alignItems: "center", flexDirection: "row", gap: 4, marginTop: 4 },
+  transportPlanMarkAvailable: {},
   transportPlanMarkText: { color: "#795000", fontFamily: FONTS.medium, fontSize: 10 },
   transportPlanMarkTextAvailable: { color: COLORS.green },
   transportSourceLine: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 10, flexDirection: "row", gap: 8, marginTop: 15, padding: 11 },
@@ -2260,14 +3489,16 @@ const styles = StyleSheet.create({
   transportUpdatedAt: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 6 },
   dataSourcesInlineLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, marginTop: 8 },
   dataSourcesInlineLinkText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
-  searchBox: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 14, minHeight: 48, paddingHorizontal: 12 },
+  transportDataMeta: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, marginTop: 9 },
+  transportDataMetaText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11 },
+  searchBox: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 14, minHeight: 48, paddingHorizontal: 12 },
   title: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 20 },
   hubContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20 },
   homeContent: { flexGrow: 1, paddingBottom: 28 },
-  dashboardContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20 },
+  dashboardContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
   dashboardTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 18 },
   dashboardDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
-  dashboardDay: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 3 },
+  dashboardDay: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, letterSpacing: -0.5, lineHeight: 31 },
   dashboardCityChip: { alignItems: "center", backgroundColor: "transparent", flexDirection: "row", gap: 4, paddingHorizontal: 2, paddingVertical: 7 },
   dashboardCityText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
   dashboardStatusGrid: { flexDirection: "row", gap: 10, marginTop: 17 },
@@ -2278,42 +3509,100 @@ const styles = StyleSheet.create({
   weatherPreviewIcon: { height: 34, marginLeft: -6, marginTop: -5, width: 34 },
   cityWeatherIcon: { height: 30, width: 30 },
   weatherPreviewTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, marginTop: 2 },
-  weatherFeatureCard: { alignItems: "stretch", backgroundColor: "#eaf2ff", borderColor: "#d4e3f7", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 17, minHeight: 128, overflow: "hidden", padding: 14 },
-  weatherFeatureMain: { flex: 1, justifyContent: "space-between" },
+  weatherFeatureCard: { alignItems: "stretch", backgroundColor: "#eaf2ff", borderColor: "#d4e3f7", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 15, minHeight: 100, overflow: "hidden", padding: 9 },
+  weatherFeatureInfo: { flex: 1, flexDirection: "row", minWidth: 0 },
+  weatherFeatureMain: { flex: 1, justifyContent: "center" },
   weatherFeatureLabel: { color: "#526d89", fontFamily: FONTS.medium, fontSize: 11 },
   weatherFeatureTemperatureRow: { alignItems: "center", flexDirection: "row", gap: 4, marginTop: -2 },
-  weatherFeatureTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 45, letterSpacing: -2, lineHeight: 53 },
-  weatherFeatureIcon: { height: 55, width: 55 },
-  weatherFeatureCondition: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 13, marginTop: -5 },
-  weatherFeatureAir: { alignItems: "flex-start", backgroundColor: "rgba(255,255,255,0.78)", borderRadius: 13, justifyContent: "center", paddingHorizontal: 11, paddingVertical: 10, width: 118 },
-  weatherFeatureAirLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 7 },
+  weatherFeatureTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 35, letterSpacing: -1.5, lineHeight: 40 },
+  weatherFeatureIcon: { height: 42, width: 42 },
+  weatherFeatureCondition: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12, marginTop: -3 },
+  weatherFeatureAir: { alignItems: "flex-start", borderLeftColor: "#c5d7ec", borderLeftWidth: 1, justifyContent: "center", marginLeft: 4, paddingLeft: 8, width: 88 },
+  weatherFeatureAirLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 3 },
   weatherFeatureAirValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
-  weatherFeatureAirMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 2 },
-  weatherFeatureChevron: { position: "absolute", right: 8, top: 8 },
-  airAlertBanner: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 9, paddingHorizontal: 11, paddingVertical: 9 },
+  weatherFeatureAirMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 2 },
+  weatherFeatureAlert: { alignItems: "center", borderRadius: 9, gap: 5, justifyContent: "center", minHeight: 80, paddingHorizontal: 6, width: 80 },
+  weatherFeatureAlertClear: { backgroundColor: "#dff1da" },
+  weatherFeatureAlertUnknown: { backgroundColor: COLORS.blueSurface },
+  weatherFeatureAlertActive: { backgroundColor: "#ffe3e0" },
+  weatherFeatureAlertText: { color: "#245b31", fontFamily: FONTS.medium, fontSize: 11, lineHeight: 14, textAlign: "center" },
+  weatherFeatureAlertTextActive: { color: "#8e1b1b" },
+  weatherFeatureChevron: { position: "absolute", right: 5, top: 5 },
+  airAlertBanner: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 8, marginTop: 9, minHeight: 46, paddingHorizontal: 10, paddingVertical: 7 },
   airAlertBannerClear: { backgroundColor: "#eef8eb" },
   airAlertBannerActive: { backgroundColor: "#fff4f3", borderColor: "#f0b5b0", borderWidth: 1 },
-  airAlertIcon: { alignItems: "center", borderRadius: 9, height: 34, justifyContent: "center", width: 34 },
+  airAlertIcon: { alignItems: "center", borderRadius: 8, height: 30, justifyContent: "center", width: 30 },
   airAlertIconClear: { backgroundColor: "#dff1da" },
   airAlertIconActive: { backgroundColor: "#ffe3e0" },
   airAlertCopy: { flex: 1 },
   airAlertTitle: { color: COLORS.green, fontFamily: FONTS.semibold, fontSize: 12 },
   airAlertTitleActive: { color: "#8e1b1b" },
+  airAlertTextClear: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 10, marginTop: 1 },
   airAlertTextActive: { color: "#a54943" },
-  currencyWidget: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 14 },
+  defendersBanner: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 10, minHeight: 56, paddingHorizontal: 12, paddingVertical: 9 },
+  defendersBannerGlow: {},
+  defendersBannerIcon: { alignItems: "center", backgroundColor: "#fff3ce", borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
+  defendersBannerCopy: { flex: 1 },
+  defendersBannerKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.7 },
+  defendersBannerTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
+  defendersBannerText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  defendersBannerAction: {},
+  defendersContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  defendersHero: { backgroundColor: "#173f37", borderRadius: 19, marginTop: 15, overflow: "hidden", padding: 19 },
+  defendersHeroMark: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.09)", borderColor: "rgba(247,190,61,0.35)", borderRadius: 15, borderWidth: 1, height: 52, justifyContent: "center", width: 52 },
+  defendersHeroKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.9, marginTop: 18 },
+  defendersHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31, marginTop: 5 },
+  defendersHeroText: { color: "#d9ece6", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 8 },
+  defendersIntro: { marginTop: 18 },
+  defendersIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31 },
+  defendersIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  featuredDonationCard: { backgroundColor: "#123a63", borderColor: "#285375", borderRadius: 15, borderWidth: 1, marginTop: 13, padding: 14 },
+  featuredDonationTop: { alignItems: "center", flexDirection: "row", gap: 10 },
+  featuredDonationIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
+  featuredDonationCopy: { flex: 1 },
+  featuredDonationLabel: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.7 },
+  featuredDonationTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 16, marginTop: 3 },
+  featuredDonationText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 12 },
+  featuredDonationButton: { alignItems: "center", backgroundColor: "#f7be3d", borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 13, minHeight: 44, paddingHorizontal: 13 },
+  featuredDonationButtonText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
+  defendersTrustCard: { alignItems: "flex-start", backgroundColor: "#eef8eb", borderColor: "#d7ead0", borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 13, padding: 13 },
+  defendersTrustIcon: { alignItems: "center", backgroundColor: "#dff1da", borderRadius: 10, height: 39, justifyContent: "center", width: 39 },
+  defendersTrustCopy: { flex: 1 },
+  defendersTrustTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontSize: 14 },
+  defendersTrustText: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 3 },
+  defendersFundList: { gap: 10, marginTop: 22 },
+  defendersListTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, marginBottom: 1 },
+  defendersFundCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, padding: 14 },
+  defendersFundTop: { alignItems: "center", flexDirection: "row", gap: 10 },
+  defendersFundIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 41, justifyContent: "center", width: 41 },
+  defendersFundCopy: { flex: 1 },
+  defendersFundTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
+  defendersFundVerified: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11, marginTop: 3 },
+  defendersFundDescription: { color: "#526170", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 12 },
+  defendersFundSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  defendersDonateButton: { alignItems: "center", backgroundColor: "#173f37", borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 13, minHeight: 46, paddingHorizontal: 13 },
+  defendersDonateButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  defendersEmptyCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderStyle: "dashed", borderWidth: 1, marginTop: 22, padding: 20 },
+  defendersEmptyIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
+  defendersEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 12 },
+  defendersEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
+  defendersFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 20, textAlign: "center" },
+  currencyWidget: { borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 22, paddingVertical: 12 },
   currencyWidgetHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   currencyWidgetTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
   currencyWidgetTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
   currencyWidgetSource: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
   currencyRatesRow: { flexDirection: "row", gap: 9, marginTop: 13 },
-  currencyRate: { backgroundColor: "#f6f8fd", borderRadius: 10, flex: 1, paddingHorizontal: 9, paddingVertical: 8 },
+  currencyRate: { borderLeftColor: COLORS.border, borderLeftWidth: 1, flex: 1, paddingHorizontal: 9, paddingVertical: 4 },
   currencyCode: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
   currencyValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
   currencyMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 1 },
   currencyUnavailable: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 13 },
   currencyStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 10, marginTop: 8 },
+  currencyExpand: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 4, marginTop: 10, minHeight: 30 },
+  currencyExpandText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
   weatherContent: { paddingBottom: 32, paddingHorizontal: 20 },
-  weatherHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 18, padding: 18 },
+  weatherHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 16, padding: 16 },
   weatherHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   weatherHeroTemperature: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 52, letterSpacing: -2 },
   weatherHeroCondition: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 14, marginTop: 2 },
@@ -2328,8 +3617,8 @@ const styles = StyleSheet.create({
   weatherAirQualityLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
   weatherAirQualityValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
   weatherAirQualityMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, lineHeight: 15, textAlign: "right" },
-  weatherDayTabs: { gap: 8, paddingTop: 18 },
-  weatherDayTab: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, minWidth: 112, paddingHorizontal: 12, paddingVertical: 10 },
+  weatherDayTabs: { gap: 5, paddingTop: 18 },
+  weatherDayTab: { backgroundColor: COLORS.blueSurface, borderRadius: 9, minWidth: 96, paddingHorizontal: 11, paddingVertical: 8 },
   weatherDayTabActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
   weatherDayTabText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 12 },
   weatherDayTabTextActive: { color: "#ffffff" },
@@ -2340,16 +3629,16 @@ const styles = StyleSheet.create({
   weatherSunTimes: { gap: 4 },
   weatherSunTime: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
   weatherSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 22 },
-  weatherHours: { gap: 8, paddingTop: 10 },
-  weatherHourCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 12, borderWidth: 1, minWidth: 70, paddingHorizontal: 9, paddingVertical: 10 },
+  weatherHours: { borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, gap: 0, marginTop: 10, paddingVertical: 10 },
+  weatherHourCard: { alignItems: "center", minWidth: 64, paddingHorizontal: 6, paddingVertical: 4 },
   weatherHourTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
   weatherHourIcon: { height: 32, marginVertical: 4, width: 32 },
   weatherHourTemperature: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
   weatherHourRain: { color: COLORS.navy, fontFamily: FONTS.regular, fontSize: 10, marginTop: 3 },
-  weatherSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 22, textAlign: "center" },
+  weatherSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 22, textAlign: "center" },
   weatherStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 11, marginTop: 5, textAlign: "center" },
-  dashboardSectionRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 26 },
-  dashboardSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 18 },
+  dashboardSectionRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 27, paddingBottom: 9 },
+  dashboardSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17 },
   dashboardAllLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
   dashboardFeedCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 9, padding: 13 },
   dashboardFeedIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
@@ -2357,17 +3646,18 @@ const styles = StyleSheet.create({
   dashboardFeedTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
   dashboardFeedText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
   homeNewsList: { marginTop: 4 },
-  homeNewsItem: { alignItems: "center", borderBottomColor: "#dce2ea", borderBottomWidth: 1, flexDirection: "row", gap: 10, paddingVertical: 13 },
-  homeNewsIcon: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, height: 36, justifyContent: "center", width: 36 },
+  homeNewsItem: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingVertical: 12 },
+  homeNewsIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
   homeNewsCopy: { flex: 1 },
-  homeNewsTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
-  homeNewsMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
+  homeNewsTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
+  homeNewsMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
   homeNewsAllButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
   homeNewsAllText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
   dashboardServicesRow: { gap: 10, paddingTop: 10, paddingRight: 4 },
-  dashboardServiceCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, height: 112, justifyContent: "space-between", padding: 12, width: 116 },
-  dashboardServiceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 38, justifyContent: "center", width: 38 },
-  dashboardServiceTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 12, lineHeight: 16 },
+  dashboardServicesGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 10 },
+  dashboardServiceCard: { alignItems: "center", borderColor: COLORS.border, borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 60, paddingHorizontal: 10, paddingVertical: 9, width: "48.7%" },
+  dashboardServiceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 7, height: 33, justifyContent: "center", width: 33 },
+  dashboardServiceTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontSize: 11, lineHeight: 15 },
   simpleTabContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20, paddingTop: 0 },
   cityKicker: { color: "#43474e", fontSize: 12, fontWeight: "700", letterSpacing: 1.1, marginTop: 20 },
   homeTitle: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 6 },
@@ -2479,7 +3769,94 @@ const styles = StyleSheet.create({
   miniaturesFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, marginHorizontal: 14, marginTop: 10, textAlign: "center" },
   sourceButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 14, minHeight: 46 },
   sourceButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  parkingContent: { gap: 10, paddingBottom: 32, paddingHorizontal: 20 },
+  paymentContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  paymentHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
+  paymentHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  paymentHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
+  paymentHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 17 },
+  paymentHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  paymentSafetyNote: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
+  paymentSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  paymentCard: { marginTop: 20 },
+  paymentSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 9 },
+  paymentTicketChoice: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 22, padding: 12 },
+  paymentReferenceBlock: { marginBottom: 22, marginTop: 14 },
+  paymentReferenceHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 7 },
+  paymentTicketIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  paymentTicketCopy: { flex: 1 },
+  paymentTicketTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
+  paymentTicketText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
+  paymentTicketPrice: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 15 },
+  paymentMethod: { alignItems: "center", borderColor: COLORS.controlBorder, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, minHeight: 62, padding: 11 },
+  paymentMethodActive: { backgroundColor: "#f3f8ff", borderColor: COLORS.controlBorder },
+  paymentMethodIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 38, justifyContent: "center", width: 38 },
+  paymentMethodCopy: { flex: 1 },
+  paymentMethodTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 13 },
+  paymentMethodText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
+  paymentCardFields: { marginTop: 14 },
+  paymentCardFieldsRow: { flexDirection: "row", gap: 9, marginTop: 10 },
+  paymentCardFieldHalf: { flex: 1 },
+  paymentFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 12, marginBottom: 6 },
+  paymentLast4Label: { marginTop: 14 },
+  paymentCardInput: { backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 9, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, minHeight: 48, paddingHorizontal: 11 },
+  accountModeRow: { flexDirection: "row", gap: 8, marginBottom: 18 },
+  accountMode: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, flex: 1, paddingVertical: 10 },
+  accountModeActive: { backgroundColor: COLORS.navy },
+  accountModeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  accountModeTextActive: { color: "#ffffff" },
+  accountPasswordLabel: { marginTop: 12 },
+  accountError: { color: "#a31d1d", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 10 },
+  accountSubmitDisabled: { opacity: 0.55 },
+  pollResult: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 9, marginTop: 13, padding: 12 },
+  pollResultText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  paymentAddCardRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 8, marginTop: 10, minHeight: 48, paddingHorizontal: 3 },
+  paymentAddCardText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.semibold, fontSize: 13 },
+  paymentSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 20, minHeight: 50, paddingHorizontal: 14 },
+  paymentSubmitButtonDisabled: { backgroundColor: "#90a0b2" },
+  paymentSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  savedPaymentCard: { backgroundColor: COLORS.navy, borderRadius: 15, marginTop: 2, overflow: "hidden", padding: 15 },
+  savedPaymentCardTop: { alignItems: "center", flexDirection: "row", gap: 11 },
+  savedPaymentCardIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  savedPaymentCardLabel: { color: "#d7e9fb", fontFamily: FONTS.medium, fontSize: 12 },
+  savedPaymentCardNumber: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 17, letterSpacing: 0.7, marginTop: 4 },
+  removePaymentCardButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 15, minHeight: 42 },
+  removePaymentCardText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  paymentMethodsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },
+  paymentFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 11, textAlign: "center" },
+  paymentSuccessHero: { marginTop: 18 },
+  paymentSuccessIcon: { alignItems: "center", backgroundColor: COLORS.green, borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
+  paymentSuccessKicker: { color: "#b9e7b2", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.8, marginTop: 12 },
+  paymentSuccessTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 24 },
+  paymentSuccessText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  demoTicket: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 17, borderStyle: "dashed", borderWidth: 1, marginTop: 14, overflow: "hidden", padding: 16 },
+  demoTicketTop: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between" },
+  demoTicketLabel: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.7 },
+  demoTicketTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 20, marginTop: 4 },
+  demoQr: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 15, paddingVertical: 16 },
+  demoQrInner: { alignItems: "center", backgroundColor: "#f4f7fb", borderRadius: 8, height: 96, justifyContent: "center", width: 96 },
+  demoTicketMeta: { flexDirection: "row", justifyContent: "space-between", marginTop: 13 },
+  demoTicketMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  paymentNextCard: { backgroundColor: COLORS.blueSurface, borderRadius: 14, marginTop: 13, padding: 14 },
+  paymentNextTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
+  paymentNextText: { color: "#40546b", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  paymentSecondaryButton: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: 7, marginTop: 18, padding: 8 },
+  paymentSecondaryButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  eventsContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  eventsSourceNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 14, padding: 12 },
+  eventsSourceText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  eventsDayGroup: { marginTop: 19 },
+  eventsDayHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 7 },
+  eventsList: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, overflow: "hidden" },
+  eventRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 76, paddingHorizontal: 12, paddingVertical: 10 },
+  eventDateBadge: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
+  eventDateBadgeDay: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 16, lineHeight: 17 },
+  eventDateBadgeMonth: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 8, letterSpacing: 0.4, marginTop: 1 },
+  eventCopy: { flex: 1 },
+  eventTopLine: { alignItems: "flex-start", flexDirection: "row", gap: 7 },
+  eventTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
+  eventCategory: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 10, maxWidth: 64, textAlign: "right" },
+  eventMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  parkingContent: { paddingBottom: 32, paddingHorizontal: 20 },
   parkingHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 18, padding: 17 },
   parkingHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   parkingHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
@@ -2488,12 +3865,17 @@ const styles = StyleSheet.create({
   parkingHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, marginTop: 15 },
   parkingHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
   parkingSectionHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 14 },
+  parkingActionList: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 16, overflow: "hidden" },
+  parkingActionRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 76, paddingHorizontal: 12, paddingVertical: 10 },
   parkingActionCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 1, padding: 14 },
   parkingActionHeading: { alignItems: "center", flexDirection: "row", gap: 10 },
   parkingActionIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
-  parkingActionTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 15 },
-  parkingActionText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 10 },
+  parkingActionCopy: { flex: 1 },
+  parkingActionTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
+  parkingActionText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 2 },
   parkingActionLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12, marginTop: 10 },
+  parkingInfoNote: { alignItems: "flex-start", backgroundColor: "#fff8e9", borderColor: "#f2dcaa", borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 14, padding: 12 },
+  parkingInfoCopy: { flex: 1 },
   parkingUnavailable: { backgroundColor: "#fff8e9", borderColor: "#f2dcaa", borderRadius: 14, borderWidth: 1, marginTop: 7, padding: 14 },
   parkingUnavailableTitle: { color: "#624600", fontFamily: FONTS.semibold, fontSize: 14 },
   parkingUnavailableText: { color: "#735817", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 7 },
@@ -2503,22 +3885,24 @@ const styles = StyleSheet.create({
   dataSourcesLink: { color: "#123a63", fontSize: 13, fontWeight: "700", marginTop: 8 },
   searchInput: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13, paddingVertical: 10 },
   searchModes: { flexDirection: "row", gap: 8, marginTop: 11 },
-  searchMode: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 9, borderWidth: 1, flex: 1, minHeight: 39, justifyContent: "center" },
+  searchMode: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 9, borderWidth: 1, flex: 1, minHeight: 44, justifyContent: "center" },
   searchModeActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
   searchModeText: { color: "#596574", fontFamily: FONTS.medium, fontSize: 12 },
   searchModeTextActive: { color: "#ffffff", fontFamily: FONTS.semibold },
-  list: { gap: 9, paddingBottom: 22, paddingHorizontal: 20, paddingTop: 16 },
-  transportListHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 2 },
-  routeCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 68, padding: 12 },
+  list: { paddingBottom: 22, paddingHorizontal: 20, paddingTop: 16 },
+  transportListHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 9 },
+  transportSavedHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: -4 },
+  routeCard: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 64, paddingHorizontal: 11, paddingVertical: 8 },
   routeBadge: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 8, justifyContent: "center", minWidth: 47, paddingHorizontal: 7, paddingVertical: 8 },
   routeBadgeText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 15 },
   routeCardCopy: { flex: 1 },
   routeName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  routeCardMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
-  stopCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 10, minHeight: 68, padding: 13 },
+  routeCardMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
+  favoriteButton: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  stopCard: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 64, paddingHorizontal: 11, paddingVertical: 8 },
   stopCardText: { flex: 1 },
   stopCardName: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  stopCardAction: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, marginTop: 4 },
+  stopCardAction: { color: COLORS.tertiary, fontFamily: FONTS.medium, fontSize: 12, marginTop: 3 },
   empty: { color: COLORS.muted, fontFamily: FONTS.regular, textAlign: "center" },
   transportEmptyState: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 6, padding: 22 },
   transportEmptyIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 48, justifyContent: "center", width: 48 },
@@ -2530,25 +3914,27 @@ const styles = StyleSheet.create({
   transportEmptySecondaryAction: { backgroundColor: COLORS.blueSurface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
   transportEmptySecondaryActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
   back: { color: "#123a63", fontSize: 16, fontWeight: "600", marginTop: 20 },
-  stopDetailsTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 23, lineHeight: 29, marginTop: 16 },
+  stopDetailsHeading: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 16 },
+  stopDetailsTitle: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.bold, fontSize: 23, lineHeight: 29 },
   stopDetailsSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
+  stopDetailsCode: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12, marginTop: 4 },
   routeHeader: { alignItems: "center", flexDirection: "row", gap: 12, marginVertical: 16 },
-  routeDetailHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginBottom: 14, marginTop: 10, padding: 16 },
+  routeDetailHero: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginBottom: 12, marginTop: 10, padding: 14 },
   routeDetailTopLine: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   routeDetailRouteIdentity: { alignItems: "center", flexDirection: "row", gap: 8 },
   routeDetailRouteLabel: { color: "#c9d8ee", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.8 },
-  routeDetailRouteBadge: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 12, height: 50, justifyContent: "center", minWidth: 54, paddingHorizontal: 10 },
-  routeDetailRouteNumber: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 27, lineHeight: 31 },
-  routeDetailPlanMark: { alignItems: "center", backgroundColor: "rgba(247,190,61,0.13)", borderColor: "rgba(247,190,61,0.38)", borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingVertical: 6 },
-  routeDetailPlanMarkText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
-  routeDetailTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, lineHeight: 26, marginTop: 14 },
-  routeDetailTermini: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  routeDetailRouteBadge: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, height: 42, justifyContent: "center", minWidth: 46, paddingHorizontal: 8 },
+  routeDetailRouteNumber: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 22, lineHeight: 26 },
+  routeDetailPlanMark: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingVertical: 6 },
+  routeDetailPlanMarkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
+  routeDetailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, lineHeight: 25, marginTop: 10 },
+  routeDetailTermini: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
   routeDetailSource: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 14 },
   routeDetailSourceText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 11, flex: 1, lineHeight: 16 },
-  routeMapPreview: { borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, height: 190, marginBottom: 12, overflow: "hidden" },
+  routeMapPreview: { borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, height: 170, marginBottom: 10, overflow: "hidden" },
   routeMapPreviewMap: { flex: 1 },
-  routeMapPreviewLabel: { backgroundColor: "rgba(0,36,70,0.88)", bottom: 10, borderRadius: 8, left: 10, paddingHorizontal: 10, paddingVertical: 7, position: "absolute" },
-  routeMapPreviewLabelText: { color: "#ffffff", fontFamily: FONTS.medium, fontSize: 11 },
+  routeMapPreviewLabel: { backgroundColor: "rgba(255,255,255,0.96)", borderColor: "#d4e0ec", borderRadius: 8, borderWidth: 1, bottom: 10, left: 10, paddingHorizontal: 10, paddingVertical: 7, position: "absolute" },
+  routeMapPreviewLabelText: { color: "#123a63", fontFamily: FONTS.medium, fontSize: 11 },
   transportDataNotice: { backgroundColor: "#eef4ff", borderRadius: 14, marginTop: 14, padding: 13 },
   transportDataNoticeTitle: { color: "#123a63", fontSize: 14, fontWeight: "700" },
   transportDataNoticeText: { color: "#43474e", fontSize: 13, lineHeight: 18, marginTop: 5 },
@@ -2559,13 +3945,16 @@ const styles = StyleSheet.create({
   stopsHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16 },
   stopsCountPill: { alignItems: "center", backgroundColor: "#e7eeff", borderRadius: 14, height: 28, justifyContent: "center", minWidth: 28, paddingHorizontal: 8 },
   stopsCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
-  detailsList: { gap: 14, paddingBottom: 32, paddingHorizontal: 20 },
+  transportDetailScreen: { flex: 1, backgroundColor: "#f6f7fb", paddingHorizontal: 20 },
+  stopDetailsList: { paddingBottom: 22, paddingTop: 16 },
+  detailsList: { paddingBottom: 32 },
   routeDetailsContent: { paddingBottom: 34, paddingHorizontal: 20 },
   directionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 12, marginBottom: 10, padding: 11 },
   directionCopy: { flex: 1 },
   directionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
   directionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
-  directionSwitchButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, height: 39, justifyContent: "center", width: 39 },
+  directionSwitchButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, flexDirection: "row", gap: 5, minHeight: 44, paddingHorizontal: 10 },
+  directionButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
   variant: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, overflow: "hidden", padding: 14 },
   variantHeading: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 11 },
   variantTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
@@ -2575,12 +3964,12 @@ const styles = StyleSheet.create({
   stopDotStart: { backgroundColor: COLORS.green, height: 10, width: 10 },
   stopDotEnd: { backgroundColor: COLORS.gold, height: 10, width: 10 },
   stopLine: { backgroundColor: "#d3e4ff", bottom: -2, position: "absolute", top: 26, width: 2 },
-  stopName: { color: "#4b5968", flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
+  stopName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
   stopScheduleLink: { alignItems: "center", flexDirection: "row", gap: 1 },
   stopSchedule: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
   scheduleTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 23, marginTop: 16 },
   scheduleSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
-  dateControls: { alignItems: "center", flexDirection: "row", gap: 14, marginTop: 8 },
+  dateControls: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 8 },
   dateButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
   dateButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 20 },
   selectedDate: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginTop: 2 },
@@ -2590,25 +3979,32 @@ const styles = StyleSheet.create({
   sourceCardTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
   sourceText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
   sourceUrl: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, marginTop: 9 },
-  departure: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 14, padding: 14 },
+  departure: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 14, minHeight: 60, paddingHorizontal: 4, paddingVertical: 10 },
   departureTime: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 19 },
-  departureDestination: { color: "#4b5968", flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
+  departureDestination: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
   mapScreen: { flex: 1, backgroundColor: "#f8f9ff" },
-  mapHeader: { backgroundColor: "#f8f9ff", paddingHorizontal: 20, paddingVertical: 14 },
-  mapTitle: { color: "#071d31", fontSize: 18, fontWeight: "700", marginTop: 14 },
-  mapHint: { color: "#43474e", fontSize: 13, marginTop: 4 },
+  cityMapScreen: { flex: 1, backgroundColor: "#f6f7fb" },
+  cityMapHeader: { paddingHorizontal: 20 },
+  cityMapTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 24, marginTop: 9 },
+  cityMapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginBottom: 12, marginTop: 3 },
+  cityMapCanvas: { flex: 1 },
+  cityMapSource: { alignItems: "center", backgroundColor: "#ffffff", borderTopColor: COLORS.border, borderTopWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingHorizontal: 20 },
+  cityMapSourceText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.medium, fontSize: 11 },
+  mapHeader: { backgroundColor: "#f8f9ff", paddingHorizontal: 20, paddingVertical: 9 },
+  mapTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17, lineHeight: 23, marginTop: 9 },
+  mapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
   mapDirectionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 10, marginBottom: 10, marginHorizontal: 20, padding: 10 },
   mapDirectionCopy: { flex: 1 },
   mapDirectionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
   mapDirectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
-  mapDirectionButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
+  mapDirectionButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", gap: 5, minHeight: 44, paddingHorizontal: 10 },
   mapCanvas: { flex: 1, position: "relative" },
-  mapGpsStatus: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 16, flexDirection: "row", gap: 7, left: 16, paddingHorizontal: 11, paddingVertical: 8, position: "absolute", right: 16, top: 14 },
+  mapGpsStatus: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 14, flexDirection: "row", gap: 6, left: 12, paddingHorizontal: 9, paddingVertical: 6, position: "absolute", top: 12 },
   mapGpsDot: { borderRadius: 4, height: 8, width: 8 },
   mapGpsDotLive: { backgroundColor: "#2e673d" },
   mapGpsDotStale: { backgroundColor: "#b7791f" },
   mapGpsDotOffline: { backgroundColor: "#718096" },
-  mapGpsStatusText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  mapGpsStatusText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, lineHeight: 15 },
   mapStopCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, left: 16, padding: 13, position: "absolute", right: 16, shadowColor: "#071d31", shadowOffset: { height: 5, width: 0 }, shadowOpacity: 0.14, shadowRadius: 13, top: 14 },
   mapStopCardWithGps: { top: 60 },
   mapStopCardTop: { alignItems: "center", flexDirection: "row", gap: 10 },
@@ -2638,3 +4034,53 @@ const styles = StyleSheet.create({
   retryButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, flexDirection: "row", gap: 8, marginTop: 20, minHeight: 48, paddingHorizontal: 18 },
   retryText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 14 },
 });
+
+function themedStyleValue(property: string, value: unknown, isDark: boolean): unknown {
+  if (!isDark || typeof value !== "string") {
+    return value;
+  }
+
+  const color = value.toLowerCase();
+  if (property === "backgroundColor") {
+    if (["#ffffff", "rgba(255,255,255,0.97)", "rgba(255,255,255,0.96)", "rgba(255,255,255,0.95)"].includes(color)) return "#102d49";
+    if (["#f6f7fb", "#f8f9ff", "#f8faff", "#f4f7fb", "#eff5ff"].includes(color)) return "#071b2f";
+    if (["#eef4ff", "#e4efff", "#eaf2ff", "#e7eeff", "#f3f8ff"].includes(color)) return "#153a59";
+    if (["#f6f8fd", "rgba(255,255,255,0.78)"].includes(color)) return "#163653";
+    if (["#fff8e9", "#fff4f3", "#fff5f4"].includes(color)) return "#332b22";
+    if (color === "#fff3ce") return "#5b461d";
+    if (["#eef8eb", "#e8f7e4"].includes(color)) return "#183a2b";
+    if (color === "#dff1da") return "#234735";
+    if (color === "#ffe3e0") return "#4b2525";
+    if (color === "#123a63") return "#174b75";
+    if (color === "#002446") return "#092b49";
+  }
+
+  if (property.includes("Color") || property === "color") {
+    if (color === LIGHT_COLORS.controlBorder) return DARK_COLORS.controlBorder;
+    if (["#e2e8f0", "#d5dee9", "#f2dcaa", "#f4ceca", "#d4e3f7", "#9ec2ef"].includes(color)) return "#234561";
+    if (["#0f1d2a", "#071d31", "#002446", "#354657", "#40546b", "#3f5269"].includes(color)) return "#f3f7fc";
+    if (["#64748b", "#5b6b7c", "#596574", "#485768", "#4b5968", "#526d89", "#94a3b8", "#43474e", "#5b6e80"].includes(color)) return "#a9bed3";
+    if (["#66758a", "#64748b"].includes(color)) return "#91a9bf";
+    if (color === "#123a63") return "#8fc8ff";
+    if (["#2e673d", "#3d6836", "#3f6649", "#245b31"].includes(color)) return "#c0eab9";
+    if (color === "#8a5b00") return "#f4d47a";
+    if (["#624600", "#735817", "#795000"].includes(color)) return "#f4d47a";
+    if (["#991b1b", "#a31d1d", "#8e1b1b", "#a54943", "#9a3412"].includes(color)) return "#ffb4ad";
+  }
+
+  return value;
+}
+
+function buildStyles(isDark: boolean) {
+  const definitions = Object.fromEntries(Object.entries(STYLE_DEFINITIONS).map(([name, style]) => [
+    name,
+    Object.fromEntries(Object.entries(style).map(([property, value]) => [property,
+      isDark && name === "settingsSwitchKnob" && property === "backgroundColor"
+        ? "#ffffff"
+        : themedStyleValue(property, value, isDark),
+    ])),
+  ]));
+  return StyleSheet.create(definitions as never) as typeof STYLE_DEFINITIONS;
+}
+
+let styles: typeof STYLE_DEFINITIONS = buildStyles(false);

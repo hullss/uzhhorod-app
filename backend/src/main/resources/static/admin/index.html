@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ужгород Цифровий — редактор</title>
+  <style>
+    body { background:#f5f7fb; color:#10243b; font:16px system-ui,sans-serif; margin:0; }
+    main { margin:0 auto; max-width:760px; padding:42px 20px; }
+    h1 { margin:0 0 8px; } p { color:#526477; line-height:1.5; }
+    label { display:block; font-weight:650; margin-top:20px; }
+    input,select,textarea,button { box-sizing:border-box; font:inherit; margin-top:7px; width:100%; }
+    input,select,textarea { border:1px solid #aab8c7; border-radius:9px; padding:12px; }
+    textarea { font:13px ui-monospace,monospace; min-height:360px; }
+    button { background:#123a63; border:0; border-radius:9px; color:white; cursor:pointer; font-weight:700; padding:13px; }
+    #status { color:#3d6836; font-weight:650; min-height:24px; margin-top:14px; }
+    .note { background:#eaf2ff; border-radius:10px; margin-top:20px; padding:14px; }
+  </style>
+</head>
+<body><main>
+  <h1>Редактор контенту</h1>
+  <p>Тут працівник оновлює лише дані, а не код застосунку. Ключ редактора зберігається у змінній сервера, не в цьому файлі.</p>
+  <label>Ключ редактора<input id="key" type="password" autocomplete="current-password"></label>
+  <label>Розділ<select id="document"><option value="events">Події</option><option value="defender-funds">Перевірені збори</option></select></label>
+  <button id="load">Завантажити дані</button>
+  <label>Дані у форматі JSON<textarea id="content" spellcheck="false">{
+  "items": []
+}</textarea></label>
+  <button id="save">Зберегти та опублікувати</button>
+  <div id="status" role="status"></div>
+  <div class="note"><strong>Важливо.</strong> Перед публікацією перевіряйте адресу, дату й пряме посилання. Для бойових зборів — ще джерело підтвердження та дату перевірки.</div>
+</main><script>
+  const key = document.querySelector('#key'); const documentKey = document.querySelector('#document');
+  const content = document.querySelector('#content'); const status = document.querySelector('#status');
+  async function request(method) {
+    const options = { method, headers: { 'X-Admin-Key': key.value } };
+    if (method === 'PUT') { options.headers['Content-Type'] = 'application/json'; options.body = content.value; }
+    const response = await fetch(`/api/admin/editorial/${documentKey.value}`, options);
+    if (!response.ok) throw new Error(response.status === 401 ? 'Неправильний ключ редактора.' : `Помилка сервера: ${response.status}`);
+    return response.json();
+  }
+  document.querySelector('#load').onclick = async () => { try { content.value = JSON.stringify(await request('GET'), null, 2); status.textContent = 'Дані завантажено.'; } catch (e) { status.textContent = e.message; } };
+  document.querySelector('#save').onclick = async () => { try { JSON.parse(content.value); content.value = JSON.stringify(await request('PUT'), null, 2); status.textContent = 'Опубліковано. Застосунок побачить зміни після наступного оновлення.'; } catch (e) { status.textContent = e instanceof SyntaxError ? 'JSON має помилку. Перевір коми та лапки.' : e.message; } };
+</script></body></html>

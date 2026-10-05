@@ -1,12 +1,14 @@
 {
   "expo": {
-    "name": "Ужгород Поруч",
-    "slug": "uzhhorod-poruch",
+    "name": "Ужгород Цифровий",
+    "slug": "uzhhorod-digital",
+    "icon": "./assets/brand/uzhhorod-digital-logo.png",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "plugins": [
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-secure-store"
     ]
   }
 }

@@ -36,8 +36,15 @@ export type OfficialNewsList = {
   items: OfficialNewsItem[];
 };
 
+export type OfficialNewsArticle = {
+  title: string;
+  sourceUrl: string;
+  publishedLabel: string | null;
+  preview: string;
+};
+
 export type CurrencyRate = {
-  code: "USD" | "EUR" | "HUF" | "PLN";
+  code: "USD" | "EUR" | "HUF" | "CZK";
   buy: number;
   sell: number;
   updatedAt: string;
@@ -116,6 +123,55 @@ export type AirAlertStatus = {
   stale: boolean;
 };
 
+export type AirAlertEvent = {
+  state: "CLEAR" | "ACTIVE";
+  title: string;
+  detail: string;
+  occurredAt: string;
+};
+
+export type AirAlertEvents = {
+  events: AirAlertEvent[];
+};
+
+export type SafetyMapPoint = {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+};
+
+export type SafetyMapPoints = {
+  fetchedAt: string;
+  stale: boolean;
+  points: SafetyMapPoint[];
+};
+
+export type EditorialEvent = {
+  id: string;
+  title: string;
+  dateLabel: string;
+  day: number;
+  time?: string;
+  venue: string;
+  category: string;
+  sourceUrl: string;
+};
+
+export type EditorialEvents = { items: EditorialEvent[] };
+
+export type EditorialDefenderFund = {
+  id: string;
+  title: string;
+  description: string;
+  donationUrl: string;
+  verifiedAt: string;
+  verificationSource: string;
+};
+
+export type EditorialDefenderFunds = { items: EditorialDefenderFund[] };
+
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
 const requestTimeoutMs = 8_000;
 
@@ -153,8 +209,17 @@ export async function getLatestOpenDataDatasets(): Promise<OpenDataDatasetList> 
   return request("/api/city-services/open-data/datasets", "Не вдалося завантажити оновлення даних");
 }
 
-export async function getOfficialNews(): Promise<OfficialNewsList> {
-  return request("/api/city-services/news", "Не вдалося завантажити офіційні новини");
+export async function getOfficialNews(forceRefresh = false): Promise<OfficialNewsList> {
+  const path = forceRefresh ? "/api/city-services/news?refresh=1" : "/api/city-services/news";
+  return request(path, "Не вдалося завантажити офіційні новини");
+}
+
+export async function getOfficialNewsArticle(item: OfficialNewsItem): Promise<OfficialNewsArticle> {
+  const params = new URLSearchParams({ url: item.sourceUrl });
+  if (item.publishedLabel) {
+    params.set("publishedLabel", item.publishedLabel);
+  }
+  return request(`/api/city-services/news/article?${params.toString()}`, "Не вдалося завантажити короткий перегляд новини");
 }
 
 export async function getCurrencyRates(): Promise<CurrencyRates> {
@@ -171,4 +236,20 @@ export async function getMiniSculptures(): Promise<MiniSculptureList> {
 
 export async function getAirAlertStatus(): Promise<AirAlertStatus> {
   return request("/api/city-services/alerts/status", "Не вдалося завантажити статус тривоги");
+}
+
+export async function getAirAlertEvents(): Promise<AirAlertEvents> {
+  return request("/api/city-services/alerts/events", "Не вдалося завантажити історію тривог");
+}
+
+export async function getSafetyMapPoints(kind: "shelters" | "resilience"): Promise<SafetyMapPoints> {
+  return request(`/api/city-services/maps/${kind}`, "Не вдалося завантажити позначки мапи");
+}
+
+export async function getEditorialEvents(): Promise<EditorialEvents> {
+  return request("/api/editorial/events", "Не вдалося завантажити події");
+}
+
+export async function getEditorialDefenderFunds(): Promise<EditorialDefenderFunds> {
+  return request("/api/editorial/defender-funds", "Не вдалося завантажити перевірені збори");
 }

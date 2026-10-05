@@ -47,3 +47,14 @@ city-services:
   news:
     source-url: ${CITY_NEWS_SOURCE_URL:https://rada-uzhgorod.gov.ua/}
     cache-duration: ${CITY_NEWS_CACHE_DURATION:PT10M}
+  maps:
+    shelters-geojson-url: ${SHELTERS_GEOJSON_URL:https://geo.rada-uzhgorod.gov.ua/api-user/geojson/3317996270789854695.json}
+    shelters-cache-duration: ${SHELTERS_CACHE_DURATION:PT30M}
+
+editorial:
+  admin-key: ${EDITORIAL_ADMIN_KEY:}
+
+notifications:
+  expo:
+    # Turn this on only after a real device token and Expo credentials have been verified.
+    enabled: ${EXPO_PUSH_ENABLED:false}

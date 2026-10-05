@@ -215,8 +215,10 @@ public class TransportVehiclePositionService {
                 if (!isUzhhorodCoordinate(latitude, longitude)) {
                     continue;
                 }
-                long deviceId = vehicle.path("id").asLong(-1);
-                String id = deviceId > 0 ? "vehicle-" + routeId + "-" + deviceId : "vehicle-" + routeId + "-" + vehicles.size();
+                // The provider's device id identifies a tracker, not a public vehicle number.
+                // A response-local marker id is enough for the map key and keeps that technical
+                // identifier out of the public API.
+                String id = "vehicle-" + routeId + "-" + vehicles.size();
                 Integer speed = vehicle.path("spd").isNumber() ? vehicle.path("spd").asInt() : null;
                 Integer heading = vehicle.path("azi").isNumber()
                         ? Math.floorMod(vehicle.path("azi").asInt(), 360)

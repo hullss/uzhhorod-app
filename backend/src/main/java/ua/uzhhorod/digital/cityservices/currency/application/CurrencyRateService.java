@@ -24,7 +24,7 @@ public class CurrencyRateService {
             840, "USD",
             978, "EUR",
             348, "HUF",
-            985, "PLN");
+            203, "CZK");
 
     private final RestClient restClient;
     private final String sourceUrl;
@@ -103,7 +103,7 @@ public class CurrencyRateService {
             case "USD" -> 1;
             case "EUR" -> 2;
             case "HUF" -> 3;
-            case "PLN" -> 4;
+            case "CZK" -> 4;
             default -> 99;
         };
     }

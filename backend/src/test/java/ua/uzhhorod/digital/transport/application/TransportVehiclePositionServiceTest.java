@@ -40,7 +40,7 @@ class TransportVehiclePositionServiceTest {
                 vehiclesSource, routes, java.time.Instant.parse("2026-09-28T12:00:00Z"));
 
         assertThat(vehicles).singleElement().satisfies(vehicle -> {
-            assertThat(vehicle.id()).isEqualTo("vehicle-1136-5556");
+            assertThat(vehicle.id()).isEqualTo("vehicle-1136-0");
             assertThat(vehicle.routeNumber()).isEqualTo("2");
             assertThat(vehicle.latitude()).isEqualTo(48.615415);
             assertThat(vehicle.longitude()).isEqualTo(22.276235);
