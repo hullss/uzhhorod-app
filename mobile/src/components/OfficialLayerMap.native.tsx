@@ -1,5 +1,6 @@
 import MapView, { Marker, UrlTile } from "react-native-maps";
 import { StyleSheet } from "react-native";
+import { useAppTheme } from "../ui/theme";
 
 export type OfficialMapPoint = {
   id: string;
@@ -13,6 +14,7 @@ type Props = {
   tileTemplate?: string;
   points?: OfficialMapPoint[];
   pinColor?: string;
+  onPointPress?: (point: OfficialMapPoint) => void;
 };
 
 const UZHHOROD_REGION = {
@@ -22,14 +24,16 @@ const UZHHOROD_REGION = {
   longitudeDelta: 0.09,
 };
 
-export function OfficialLayerMap({ tileTemplate, points = [], pinColor = "#c2410c" }: Props) {
-  return <MapView initialRegion={UZHHOROD_REGION} style={styles.map} rotateEnabled={false} pitchEnabled={false}>
+export function OfficialLayerMap({ tileTemplate, points = [], pinColor = "#c2410c", onPointPress }: Props) {
+  const dark = useAppTheme();
+  return <MapView userInterfaceStyle={dark ? "dark" : "light"} initialRegion={UZHHOROD_REGION} style={styles.map} rotateEnabled={false} pitchEnabled={false}>
     {tileTemplate ? <UrlTile maximumZ={19} minimumZ={10} tileSize={256} urlTemplate={tileTemplate} zIndex={10} /> : null}
     {points.map((point) => <Marker
       key={point.id}
       coordinate={{ latitude: point.latitude, longitude: point.longitude }}
       title={point.name}
       description={point.address}
+      onPress={() => onPointPress?.(point)}
       pinColor={pinColor}
       tracksViewChanges={false}
       zIndex={20}

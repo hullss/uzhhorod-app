@@ -49,17 +49,14 @@ public class TransportRouteMapService {
                                 .map(point -> new TransportMapPointResponse(point.getLatitude(), point.getLongitude()))
                                 .toList()))
                 .toList();
-        var stops = variants.stream()
+        var stopIds = variants.stream()
                 .flatMap(variant -> variantStopRepository
                         .findAllByIdRouteVariantIdOrderByIdStopSequenceAsc(variant.getId()).stream())
-                .map(variantStop -> stopRepository.findById(variantStop.getStopId()).orElseThrow())
-                .collect(java.util.stream.Collectors.toMap(
-                        stop -> stop.getId(),
-                        stop -> stop,
-                        (first, ignored) -> first,
-                        java.util.LinkedHashMap::new))
-                .values()
-                .stream()
+                .map(variantStop -> variantStop.getStopId()).distinct().toList();
+        var byId = stopRepository.findAllById(stopIds).stream()
+                .collect(java.util.stream.Collectors.toMap(stop -> stop.getId(), stop -> stop));
+        var stops = stopIds.stream()
+                .map(id -> java.util.Objects.requireNonNull(byId.get(id), "Missing route stop"))
                 .map(stop -> new TransportStopResponse(
                         stop.getId(), stop.getExternalId(), stop.getName(), stop.getLatitude(), stop.getLongitude()))
                 .toList();

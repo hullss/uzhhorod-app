@@ -1,34 +1,41 @@
+import { getLocale, translate } from "./src/i18n/locale";
+import { PowerOutagesScreen } from "./src/components/PowerOutagesScreen";
+import { newsDateLabel } from "./src/news/article";
+import { Alert, Pressable, Text, TextInput, useLanguage } from "./src/i18n/ui";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
-import {
-  PublicSans_400Regular,
-  PublicSans_500Medium,
-  PublicSans_600SemiBold,
-  PublicSans_700Bold,
-  useFonts,
-} from "@expo-google-fonts/public-sans";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScreenSafeArea as SafeAreaView, useAnimatedBack, useScreenActive } from "./src/ui/Screen";
+import { ScreenStack } from "./src/ui/ScreenStack";
+import { navigationPath, type NavigationFrame } from "./src/ui/navigation";
+import { AppThemeContext } from "./src/ui/theme";
+import { AddressesScreen } from "./src/components/AddressesScreen";
+import { ProfileOverviewScreen } from "./src/components/ProfileOverviewScreen";
+import { FavoritesScreen } from "./src/components/FavoritesScreen";
+import { PersonalDetailsScreen, ProfileSettingsScreen, SegmentedChoice } from "./src/components/ProfileSettingsScreen";
+import { TransportStopsScreen } from "./src/components/TransportStopsScreen";
+import { TransportCacheNotice } from "./src/components/TransportCacheNotice";
+import { StorageRecoveryNotice } from "./src/components/StorageRecoveryNotice";
+import { DemoCardScreen } from "./src/components/DemoCardScreen";
+import { WasteScreen } from "./src/components/WasteScreen";
+import { ParkingDemoScreen } from "./src/components/ParkingDemoScreen";
 import { RouteMap, type MapRegion } from "./src/components/RouteMap";
 import { OfficialLayerMap } from "./src/components/OfficialLayerMap";
 import { MiniaturesMap } from "./src/components/MiniaturesMap";
+import { DemoTransportPaymentScreen } from "./src/components/DemoTransportPaymentScreen";
+import { CnapAppointmentsScreen } from "./src/components/CnapAppointmentsScreen";
+import { PollsScreen } from "./src/components/PollsScreen";
+import { CityEventsScreen } from "./src/components/CityEventsScreen";
+import { NewsArticleScreen } from "./src/components/NewsArticleScreen";
+import { civicStyles, PrimaryButton, ServiceHeader, ServiceSheet, useHardwareBack } from "./src/components/CivicServiceUI";
+import type { DemoTicket } from "./src/payments/demoTransport";
+import { appendDemoTicket, persistDemoTickets, restoreDemoTickets } from "./src/storage/demoTickets";
+import { persistDemoCard, restoreDemoCard, type DemoPaymentCard } from "./src/storage/demoPaymentCard";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  BackHandler,
-  FlatList,
-  Image,
-  Linking,
-  PanResponder,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useColorScheme,
-  View,
+  ActivityIndicator, AppState, Animated, BackHandler, FlatList, Image, Linking,
+  RefreshControl, ScrollView, StyleSheet,
+  useColorScheme, useWindowDimensions, View,
 } from "react-native";
 import {
   getRoute,
@@ -54,9 +61,7 @@ import {
   getCurrencyRates,
   getMiniSculptures,
   getOfficialNews,
-  getOfficialNewsArticle,
   getSafetyMapPoints,
-  getEditorialEvents,
   getEditorialDefenderFunds,
   getWeather,
   type AccessibleBuilding,
@@ -65,15 +70,22 @@ import {
   type AirAlertEvent,
   type CurrencyRates,
   type OfficialNewsList,
-  type OfficialNewsArticle,
   type OfficialNewsItem,
   type SafetyMapPoint,
   type MiniSculpture,
   type MiniSculptureList,
   type Weather,
 } from "./src/api/cityServices";
-import { changeAccountPassword, deleteAccount, loginAccount, logoutAccount, refreshAccountSession, registerAccount, updateAccountFavorites, type AccountSession } from "./src/api/account";
+import { changeAccountPassword, deleteAccount, loginAccount, logoutAccount, recoverAccountSession, registerAccount, updateAccountFavorites, updateAccountPreferences, type AccountSession } from "./src/api/account";
 import { clearSecureSession, persistSecureSession, restoreSecureSession } from "./src/storage/secureSession";
+import { DEFAULT_NOTIFICATIONS, persistPreferences, restorePreferences, type NotificationPreferences, type ThemeMode } from "./src/storage/preferences";
+import { LatestRequest } from "./src/utils/latestRequest";
+import { isFreshSnapshot } from "./src/utils/freshness";
+import { transportLiveState } from "./src/utils/transportLive";
+import { CITY_TIME_ZONE, cityClock, cityDate, citySeconds } from "./src/utils/cityTime";
+import { PAGE_LAYOUT } from "./src/ui/layout";
+import { APP_FONTS } from "./src/ui/fonts";
+import { COLOR_TOKENS } from "./src/ui/themeTokens";
 
 type ScheduleView = {
   route: TransportRouteDetails;
@@ -102,6 +114,7 @@ type CityService = {
   sourceLabel: string;
   sourceUrl?: string;
   notice?: string;
+  testScenario?: boolean;
 };
 
 type DefenderFund = {
@@ -113,26 +126,12 @@ type DefenderFund = {
   verificationSource: string;
 };
 
-type DemoPaymentCard = {
-  last4: string;
-  label: string;
-};
 
-type CityEvent = {
-  id: string;
-  title: string;
-  dateLabel: string;
-  day: number;
-  time?: string;
-  venue: string;
-  category: string;
-  sourceUrl: string;
-};
 
 const SERVICE_CATEGORIES: Array<{ id: CityService["category"]; title: string }> = [
   { id: "mobility", title: "Пересування" },
   { id: "civic", title: "Справи з містом" },
-  { id: "safety", title: "Безпека та доступність" },
+  { id: "safety", title: "Безпека та безбар’єрність" },
   { id: "places", title: "Місця й прогулянки" },
 ];
 
@@ -143,9 +142,9 @@ const CITY_SERVICES: CityService[] = [
     id: "events",
     category: "places",
     icon: "calendar-outline",
-    title: "Події в місті",
-    description: "Концерти, вистави, фестивалі та зустрічі в Ужгороді.",
-    sourceLabel: "Відкрити афішу",
+    title: "Події міста",
+    description: "Виставки, зустрічі, спорт, концерти та сімейні події.",
+    sourceLabel: "Відкрити події міста",
     notice: "Добираємо події з вказаною датою, місцем і посиланням на джерело. Перед відвідуванням перевіряйте зміни у організатора.",
   },
   {
@@ -153,9 +152,10 @@ const CITY_SERVICES: CityService[] = [
     category: "mobility",
     icon: "card-outline",
     title: "Оплата проїзду",
-    description: "Попередній перегляд купівлі квитка до інтеграції з оператором.",
+    testScenario: true,
+    description: "QR у салоні або державний номер автобуса — і оплата поїздки.",
     sourceLabel: "Відкрити оплату проїзду",
-    notice: "Оплата ще не приймає картки, не створює квиток і не списує кошти. Реальна оплата можлива лише після інтеграції з офіційним оператором.",
+    notice: "Тестова оплата без списання коштів. Демонстраційні квитки не дійсні для проїзду.",
   },
   {
     id: "donations",
@@ -171,25 +171,27 @@ const CITY_SERVICES: CityService[] = [
     category: "civic",
     icon: "document-text-outline",
     title: "Запис до ЦНАП",
-    description: "Особистий кабінет, електронні послуги та запис на прийом.",
+    testScenario: true,
+    description: "Покроковий приклад запису та офіційний кабінет ЦНАП.",
     sourceLabel: "Відкрити кабінет ЦНАП",
     sourceUrl: "https://my.cnap.rada-uzhgorod.gov.ua/",
-    notice: "Авторизація та подання заяв відбуваються тільки в офіційному кабінеті ЦНАП. Застосунок не зберігає персональні дані чи BankID.",
+    notice: "Приклад запису зберігається на пристрої, але не бронює реальну чергу. Справжні послуги доступні в офіційному кабінеті ЦНАП.",
   },
   {
     id: "polls",
     category: "civic",
     icon: "checkbox-outline",
     title: "Опитування",
+    testScenario: true,
     description: "Міські опитування та можливість поділитися думкою.",
     sourceLabel: "Незабаром",
-    notice: "Це буде власний модуль застосунку з відкритими правилами та перевіркою активних опитувань. Не створюємо фіктивних голосувань до запуску серверної частини.",
+    notice: "Демонстраційний вибір зберігається лише на пристрої. Офіційне голосування й загальні результати потребують серверної інтеграції.",
   },
   {
     id: "accessibility",
     category: "safety",
     icon: "accessibility-outline",
-    title: "Доступне місто",
+    title: "Безбар’єрність",
     description: "Реєстр будівель, щодо яких місто проводило моніторинг доступності.",
     sourceLabel: "Відкрити набір відкритих даних",
     sourceUrl: "https://data.rada-uzhgorod.gov.ua/dataset/96934681-c934-4ae3-a099-448d850620d5",
@@ -200,10 +202,11 @@ const CITY_SERVICES: CityService[] = [
     category: "mobility",
     icon: "car-outline",
     title: "Паркування",
-    description: "Правила паркування, інформація від інспекторів і пошук постанови.",
+    testScenario: true,
+    description: "Майданчик, авто, тривалість та тестова сесія паркування.",
     sourceLabel: "Перейти до офіційного сервісу",
     sourceUrl: "https://pdr.rada-uzhgorod.gov.ua/",
-    notice: "Оплату, штрафи та дані банківських карток застосунок не обробляє — це лише перехід до офіційного сервісу.",
+    notice: "Тестова сесія зберігається на пристрої, не списує коштів і не підтверджує право на паркування.",
   },
   {
     id: "power-outages",
@@ -213,7 +216,7 @@ const CITY_SERVICES: CityService[] = [
     description: "Перевірка аварійних, планових і графікових відключень від Закарпаттяобленерго.",
     sourceLabel: "Перевірити адресу в Закарпаттяобленерго",
     sourceUrl: "https://zakarpat.energy/customers/break-in-electricity-supply/realtime-outage/",
-    notice: "Офіційний сервіс показує причину вимкнення, час початку та орієнтовне відновлення за введеною адресою. Публічного API для показу цих даних у застосунку оператор поки не надає.",
+    notice: "Адресний пошук за даними публічного сервісу Закарпаттяобленерго. Час відновлення орієнтовний; відсутність запису не гарантує наявності світла.",
   },
   {
     id: "shelters",
@@ -276,43 +279,6 @@ const FEATURED_DEFENDER_DONATION = {
   note: "Це постійна Банка Руху підтримки закарпатських військових. Актуальна потреба та звітність змінюються безпосередньо на сторінці mono.",
 };
 
-const EVENT_TICKETS = {
-  philharmonic80: "https://concert.ua/uk/booking/filarmoniyi-80-velikii-yuvileinii-koncert",
-  klavdia: "https://uzhgorod.internet-bilet.ua/uk/klavdia-petrivna",
-  zukhvala: "https://uzhgorod.kontramarka.ua/uk/0410-solnij-stendap-nasti-zuhvaloi-neobovazkova-ganba-v-uzgorodi-124592.html",
-  zimmer: "https://concert.ua/uk/booking/muzika-cimmera-uzhhorod",
-  ponomariov: "https://widget.kontramarka.ua/uk/widget509site1008/widget/event/100181160?siteEventId=263659&siteShowId=114286",
-  mamyneNamysto: "https://widget.kontramarka.ua/uk/widget585site1008/widget/event/100186558?siteEventId=285574&siteShowId=122994",
-  skay: "https://widget.kontramarka.ua/uk/widget512site1008/widget/event/100182928?siteEventId=269456&siteShowId=116732",
-  misto: "https://widget.kontramarka.ua/uk/widget597site11540/widget/event/186851",
-  homin: "https://widget.kontramarka.ua/uk/widget626site14789/widget/event/100187644?siteEventId=290282&siteShowId=107212",
-  einaudi: "https://widget.kontramarka.ua/uk/widget626site14789/widget/event/100186444?siteEventId=284723&siteShowId=109722",
-  baidak: "https://widget.kontramarka.ua/uk/widget557site14840/widget/event/189195?siteEventId=287685&siteShowId=123843",
-  improv: "https://widget.kontramarka.ua/uk/widget557site14874/widget/event/185300?siteEventId=284363&siteShowId=122525",
-  queen: "https://widget.kontramarka.ua/uk/widget626site11540/widget/event/187005?siteEventId=285873&siteShowId=123085",
-};
-const CITY_EVENTS: CityEvent[] = [
-  { id: "philharmonic-80", title: "Філармонії — 80", dateLabel: "1 жовтня", day: 1, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.philharmonic80 },
-  { id: "klavdia", title: "KLAVDIA PETRIVNA SHOW", dateLabel: "3 жовтня", day: 3, time: "18:00", venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.klavdia },
-  { id: "zukhvala", title: "Стендап Насті Зухвалої", dateLabel: "4 жовтня", day: 4, time: "18:00", venue: "Belfast 2.0, вул. Волошина, 26", category: "Стендап", sourceUrl: EVENT_TICKETS.zukhvala },
-  { id: "zimmer", title: "Музика Ганса Циммера при свічках", dateLabel: "5 жовтня", day: 5, time: "19:00", venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.zimmer },
-  { id: "ponomariov", title: "Олександр Пономарьов. Сольний концерт", dateLabel: "5 жовтня", day: 5, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.ponomariov },
-  { id: "mamyne-namysto", title: "Мюзикл «Мамине намисто»", dateLabel: "10 жовтня", day: 10, venue: "Закарпатська обласна філармонія", category: "Театр", sourceUrl: EVENT_TICKETS.mamyneNamysto },
-  { id: "skay", title: "СКАЙ. 25 років на сцені", dateLabel: "12 жовтня", day: 12, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.skay },
-  { id: "misto", title: "Пластична вистава «Місто»", dateLabel: "17 жовтня", day: 17, time: "19:00", venue: "Закарпатський драмтеатр", category: "Театр", sourceUrl: EVENT_TICKETS.misto },
-  { id: "homin", title: "Хор «Гомін» в Ужгороді", dateLabel: "18 жовтня", day: 18, venue: "Закарпатський драмтеатр", category: "Концерт", sourceUrl: EVENT_TICKETS.homin },
-  { id: "einaudi", title: "Людовіко Ейнауді та Ян Тірсен при свічках", dateLabel: "22 жовтня", day: 22, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.einaudi },
-  { id: "baidak", title: "Василь Байдак в Ужгороді", dateLabel: "24 жовтня", day: 24, venue: "Закарпатська обласна філармонія", category: "Стендап", sourceUrl: EVENT_TICKETS.baidak },
-  { id: "improv", title: "Імпровізація з глядачами", dateLabel: "29 жовтня", day: 29, venue: "Закарпатський драмтеатр", category: "Шоу", sourceUrl: EVENT_TICKETS.improv },
-  { id: "queen", title: "Queen при свічках", dateLabel: "29 жовтня", day: 29, venue: "Закарпатська обласна філармонія", category: "Концерт", sourceUrl: EVENT_TICKETS.queen },
-];
-
-const CNAP_SERVICE_OPTIONS = [
-  "Реєстрація місця проживання",
-  "Витяг з реєстру територіальної громади",
-  "Соціальні послуги",
-  "Консультація щодо документів",
-];
 
 const PARKING_PORTAL_URL = "https://pdr.rada-uzhgorod.gov.ua/";
 const PARKING_EVACUATION_URL = "https://pdr.rada-uzhgorod.gov.ua/evacuation/";
@@ -340,13 +306,13 @@ type AppPalette = {
 const LIGHT_COLORS: AppPalette = {
   navy: "#123a63",
   navyDark: "#002446",
-  mist: "#f8f9ff",
-  blueSurface: "#eef4ff",
+  mist: COLOR_TOKENS.light.bg,
+  blueSurface: COLOR_TOKENS.light.soft,
   blueSoft: "#e4efff",
-  ink: "#0f1d2a",
-  muted: "#5b6b7c",
-  tertiary: "#66758a",
-  border: "#e2e8f0",
+  ink: COLOR_TOKENS.light.ink,
+  muted: COLOR_TOKENS.light.muted,
+  tertiary: COLOR_TOKENS.light.tertiary,
+  border: COLOR_TOKENS.light.border,
   separator: "#d5dee9",
   controlBorder: "#73879d",
   gold: "#e5ae2d",
@@ -357,13 +323,13 @@ const LIGHT_COLORS: AppPalette = {
 const DARK_COLORS: AppPalette = {
   navy: "#8fc8ff",
   navyDark: "#e7f2ff",
-  mist: "#071b2f",
-  blueSurface: "#102e4b",
-  blueSoft: "#173a59",
-  ink: "#f3f7fc",
-  muted: "#a9bed3",
-  tertiary: "#91a9bf",
-  border: "#234561",
+  mist: COLOR_TOKENS.dark.bg,
+  blueSurface: COLOR_TOKENS.dark.surface,
+  blueSoft: COLOR_TOKENS.dark.soft,
+  ink: COLOR_TOKENS.dark.ink,
+  muted: COLOR_TOKENS.dark.muted,
+  tertiary: COLOR_TOKENS.dark.tertiary,
+  border: COLOR_TOKENS.dark.border,
   separator: "#234561",
   controlBorder: "#7399b9",
   gold: "#f4c65b",
@@ -373,30 +339,23 @@ const DARK_COLORS: AppPalette = {
 
 let COLORS: AppPalette = LIGHT_COLORS;
 
-const FONTS = {
-  regular: "PublicSans_400Regular",
-  medium: "PublicSans_500Medium",
-  semibold: "PublicSans_600SemiBold",
-  bold: "PublicSans_700Bold",
-};
+const FONTS = APP_FONTS;
+const ProfileIdentity = createContext<{ dark: boolean }>({ dark: false });
 
 function StatusBar(_props: { style?: "dark" | "light" }) {
-  return <ExpoStatusBar style={useColorScheme() === "dark" ? "light" : "dark"} />;
+  return <ExpoStatusBar style={useContext(ProfileIdentity).dark ? "light" : "dark"} />;
 }
 
-function CivicHeader(_props: {
-  onOpenNotifications?: () => void;
-  onOpenProfile?: () => void;
-} = {}) {
+function CivicHeader() {
   return (
     <View style={styles.civicHeader}>
       <View style={styles.brandGroup}>
         <BrandMark />
-        <View>
+        <View style={styles.brandCopy}>
           <View style={styles.brandTitleRow}>
             <Text style={styles.brandTitle}>Ужгород Цифровий</Text>
           </View>
-          <Text style={styles.brandSubtitle}>офіційні міські сервіси</Text>
+          <Text style={styles.brandSubtitle}>міські сервіси в одному застосунку</Text>
         </View>
       </View>
     </View>
@@ -405,7 +364,7 @@ function CivicHeader(_props: {
 
 function BrandMark({ size = 34 }: { size?: number }) {
   return <Image
-    accessibilityLabel="Логотип Ужгород Цифровий"
+    accessibilityLabel={translate("Логотип Ужгород Цифровий")}
     source={UZHHOROD_DIGITAL_LOGO}
     style={[styles.brandMark, { borderRadius: Math.round(size * 0.22), height: size, width: size }]}
   />;
@@ -413,16 +372,23 @@ function BrandMark({ size = 34 }: { size?: number }) {
 
 function BrandIntro({ opacity, scale }: { opacity: Animated.Value; scale: Animated.Value }) {
   return <SafeAreaView style={styles.brandIntroScreen}>
-    <Animated.View style={[styles.brandIntroContent, { opacity, transform: [{ scale }] }]}>
-      <BrandMark size={88} />
-      <Text style={styles.brandIntroTitle}>Ужгород Цифровий</Text>
-      <Text style={styles.brandIntroSubtitle}>Офіційні міські сервіси</Text>
-    </Animated.View>
-    <View style={styles.brandIntroFooter}>
-      <ActivityIndicator size="small" color={COLORS.navy} />
-      <Text style={styles.brandIntroFooterText}>Завантажуємо місто</Text>
+    <View style={styles.brandIntroBody}>
+      <Animated.View style={[styles.brandIntroContent, { opacity, transform: [{ scale }] }]}>
+        <BrandMark size={88} />
+        <Text style={styles.brandIntroTitle}>Ужгород Цифровий</Text>
+        <Text style={styles.brandIntroSubtitle}>Міські сервіси в одному застосунку</Text>
+      </Animated.View>
+      <View style={styles.brandIntroFooter}>
+        <ActivityIndicator size="small" color={COLORS.navy} />
+        <Text style={styles.brandIntroFooterText}>Завантажуємо місто</Text>
+      </View>
     </View>
   </SafeAreaView>;
+}
+
+function InnerHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  const dark = useContext(AppThemeContext) ?? false;
+  return <View style={{ marginHorizontal: -PAGE_LAYOUT.gutter }}><ServiceHeader dark={dark} title={title} onBack={onBack} /></View>;
 }
 
 function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
@@ -435,47 +401,63 @@ function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
 }
 
 function useSwipeBack(onBack: () => void) {
-  return useMemo(() => PanResponder.create({
-    // Do not capture the touch on start: that used to interrupt normal vertical scrolling
-    // near the left edge. Take control only after a clear, deliberate horizontal gesture.
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gesture) => (
-      gesture.x0 <= 28
-      && gesture.dx > 14
-      && gesture.dx > Math.abs(gesture.dy) * 1.4
-    ),
-    onPanResponderTerminationRequest: () => true,
-    onPanResponderRelease: (_, gesture) => {
-      const shouldGoBack = gesture.dx >= 96 || (gesture.dx >= 48 && gesture.vx >= 0.65);
-      if (shouldGoBack && Math.abs(gesture.dy) < 72) {
-        onBack();
-      }
-    },
-  }).panHandlers, [onBack]);
+  return useAnimatedBack(onBack);
 }
 
 export default function App() {
+  return <SafeAreaProvider><AppContent /></SafeAreaProvider>;
+}
+function AppContent() {
   const systemColorScheme = useColorScheme();
-  const isDarkTheme = systemColorScheme === "dark";
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const [displayName, setDisplayName] = useState("");
+  const isDarkTheme = themeMode === "dark" || (themeMode === "system" && systemColorScheme === "dark");
   COLORS = isDarkTheme ? DARK_COLORS : LIGHT_COLORS;
-  styles = buildStyles(isDarkTheme);
-  const [fontsLoaded] = useFonts({
-    PublicSans_400Regular,
-    PublicSans_500Medium,
-    PublicSans_600SemiBold,
-    PublicSans_700Bold,
-  });
+  styles = useMemo(() => buildStyles(isDarkTheme), [isDarkTheme]);
   const [introVisible, setIntroVisible] = useState(true);
   const introOpacity = useRef(new Animated.Value(0)).current;
   const introScale = useRef(new Animated.Value(0.94)).current;
   const [section, setSection] = useState<"hub" | "transport">("hub");
   const [activeTab, setActiveTab] = useState<RootTab>("home");
-  const [profilePanel, setProfilePanel] = useState<"notifications" | "language" | "account" | "payment-methods" | "legal" | null>(null);
+  const [profilePanel, setProfilePanel] = useState<"notifications" | "language" | "account" | "payment-methods" | "legal" | "address" | "settings" | "personal" | "favorites" | null>(null);
+  const [profileReturn, setProfileReturn] = useState<"settings" | "favorites" | null>(null);
+  const [transportFromFavorites, setTransportFromFavorites] = useState(false);
+  const closeProfilePanel = () => { setProfilePanel(profileReturn); setProfileReturn(null); };
   const [account, setAccount] = useState<AccountSession | null>(null);
+  const accountRevision = useRef(0);
+  const accountMutationLocked = useRef(false);
+  const preferencesRevision = useRef(0);
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [storageRetry, setStorageRetry] = useState(0);
+  const [storageErrors, setStorageErrors] = useState({ preferences: false, card: false, tickets: false });
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const listRequest = useRef(new LatestRequest()).current;
+  const detailRequest = useRef(new LatestRequest()).current;
+  const retryTransport = useRef<() => void>(() => undefined);
   const [favoriteRouteIds, setFavoriteRouteIds] = useState<string[]>([]);
   const [favoriteStopIds, setFavoriteStopIds] = useState<string[]>([]);
-  const [language, setLanguage] = useState<"uk" | "en">("uk");
-  const [demoPaymentCard, setDemoPaymentCard] = useState<DemoPaymentCard | null>(null);
+  // Keep the saved preference in React state as well: a catalogue Fast Refresh
+  // must not reset the locale store and then overwrite the user's saved English.
+  const [language, setSavedLanguage] = useState<"uk" | "en">("uk");
+  const [runtimeLanguage, activateLanguage] = useLanguage();
+  const setLanguage = useCallback((next: "uk" | "en") => {
+    setSavedLanguage(next);
+    activateLanguage(next);
+  }, [activateLanguage]);
+  useEffect(() => { activateLanguage(language); }, [language, runtimeLanguage, activateLanguage]);
+  const [demoPaymentCard, updateDemoPaymentCard] = useState<DemoPaymentCard | null>(null);
+  const demoCardRevision = useRef(0);
+  const setDemoPaymentCard = async (card: DemoPaymentCard | null) => {
+    demoCardRevision.current++;
+    await persistDemoCard(card);
+    updateDemoPaymentCard(card);
+    setStorageErrors(previous => ({ ...previous, card: false }));
+  };
+  const [demoTickets, setDemoTickets] = useState<DemoTicket[]>([]);
+  const [demoTicketsReady, setDemoTicketsReady] = useState(false);
+  const [paymentInitialView, setPaymentInitialView] = useState<"choose" | "history">("choose");
+  const [paymentMethodsInCheckout, setPaymentMethodsInCheckout] = useState(false);
   const [weatherOpen, setWeatherOpen] = useState(false);
   const [selectedNewsArticle, setSelectedNewsArticle] = useState<{ item: OfficialNewsItem; returnTab: RootTab } | null>(null);
   const [selectedService, setSelectedService] = useState<CityService | null>(null);
@@ -491,10 +473,24 @@ export default function App() {
   const [showDataSources, setShowDataSources] = useState(false);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const goBack = useCallback(() => {
     if (section === "transport") {
+      listRequest.invalidate();
+      setListLoading(false);
+      detailRequest.invalidate();
+      setLoading(false);
+      setError(null);
+      if (loading || error) {
+        if (transportFromFavorites && !selectedRoute && !selectedStop) { setSection("hub"); return true; }
+        // A failed schedule/map request must return to the previous detail, not discard it.
+        if (!selectedRoute && !selectedStop && !routes.length && !stops.length) {
+          setSection("hub"); setActiveTab("services");
+        }
+        return true;
+      }
       if (mapScreen) {
         setMapScreen(null);
         return true;
@@ -508,10 +504,12 @@ export default function App() {
         setMapScreen(null);
         setRouteMapPreview(null);
         setSelectedRoute(null);
+        if (transportFromFavorites && !selectedStop) setSection("hub");
         return true;
       }
       if (selectedStop) {
         setSelectedStop(null);
+        if (transportFromFavorites) setSection("hub");
         return true;
       }
       if (showDataSources) {
@@ -519,7 +517,7 @@ export default function App() {
         return true;
       }
       setSection("hub");
-      setActiveTab("services");
+      setActiveTab(transportFromFavorites ? "profile" : "services");
       return true;
     }
     if (weatherOpen) {
@@ -532,11 +530,15 @@ export default function App() {
       return true;
     }
     if (selectedService) {
+      if (selectedService.id === "transport-payment" && paymentMethodsInCheckout) {
+        setPaymentMethodsInCheckout(false);
+        return true;
+      }
       setSelectedService(null);
       return true;
     }
     if (profilePanel) {
-      setProfilePanel(null);
+      setProfilePanel(profileReturn); setProfileReturn(null);
       return true;
     }
     if (activeTab !== "home") {
@@ -544,14 +546,58 @@ export default function App() {
       return true;
     }
     return false;
-  }, [activeTab, mapScreen, profilePanel, schedule, section, selectedNewsArticle, selectedRoute, selectedService, selectedStop, showDataSources, weatherOpen]);
+  }, [activeTab, error, loading, mapScreen, paymentMethodsInCheckout, profilePanel, profileReturn, routes.length, schedule, section, selectedNewsArticle, selectedRoute, selectedService, selectedStop, showDataSources, stops.length, weatherOpen, transportFromFavorites]);
 
   const transportSwipeBack = useSwipeBack(goBack);
 
   useEffect(() => {
-    if (!fontsLoaded) {
-      return;
-    }
+    let active = true;
+    if (preferencesReady && !storageErrors.preferences) return;
+    setPreferencesReady(false);
+    void restorePreferences().then((saved) => {
+      if (active && saved) {
+        if (preferencesRevision.current === 0) {
+          setLanguage(saved.language);
+          setNotificationPreferences(saved.notifications);
+        }
+        setThemeMode(saved.theme ?? "system");
+        setDisplayName(saved.displayName ?? "");
+      }
+      if (active) { setPreferencesReady(true); setStorageErrors(previous => ({ ...previous, preferences: false })); }
+    }).catch(() => { if (active) setStorageErrors(previous => ({ ...previous, preferences: true })); });
+    return () => { active = false; };
+  }, [storageRetry]);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+    void persistPreferences({ language, notifications: notificationPreferences, theme: themeMode, displayName }).catch(() => {
+      Alert.alert("Налаштування не збережено", "Після перезапуску вони можуть повернутися до попередніх значень.");
+    });
+  }, [language, notificationPreferences, themeMode, displayName, preferencesReady]);
+
+  useEffect(() => {
+    let active = true;
+    const revision = demoCardRevision.current;
+    void restoreDemoCard().then(card => {
+      if (active && demoCardRevision.current === revision) updateDemoPaymentCard(card);
+      if (active) setStorageErrors(previous => ({ ...previous, card: false }));
+    }).catch(() => {
+      // Do not erase an unreadable saved card merely because restoration failed.
+      // An explicit add/remove action can replace this record after a successful write.
+      if (active) setStorageErrors(previous => ({ ...previous, card: true }));
+    });
+    return () => { active = false; };
+  }, [storageRetry]);
+  useEffect(() => {
+    let active = true;
+    setDemoTicketsReady(false);
+    void restoreDemoTickets().then((tickets) => {
+      if (active) { setDemoTickets(tickets); setDemoTicketsReady(true); setStorageErrors(previous => ({ ...previous, tickets: false })); }
+    }).catch(() => { if (active) setStorageErrors(previous => ({ ...previous, tickets: true })); });
+    return () => { active = false; };
+  }, [storageRetry]);
+
+  useEffect(() => {
     const animation = Animated.sequence([
       Animated.parallel([
         Animated.timing(introOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
@@ -566,21 +612,32 @@ export default function App() {
       }
     });
     return () => animation.stop();
-  }, [fontsLoaded, introOpacity, introScale]);
+  }, [introOpacity, introScale]);
 
   useEffect(() => {
+    // These service flows handle their own steps and sheets; do not skip them on Android back.
+    if (["cnap", "polls", "events", "transport-payment", "parking", "waste", "power-outages"].includes(selectedService?.id ?? "")) return;
+    if (section === "hub" && profilePanel && ["address", "personal", "settings", "language", "payment-methods", "favorites"].includes(profilePanel)) return;
+    if (section === "transport" && searchMode === "stops" && !selectedRoute && !selectedStop && !loading && !error && !showDataSources) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", goBack);
     return () => subscription.remove();
-  }, [goBack]);
+  }, [goBack, selectedService?.id, profilePanel, section, searchMode, selectedRoute, selectedStop, loading, error, showDataSources]);
 
   useEffect(() => {
     let active = true;
+    const revision = accountRevision.current;
     void restoreSecureSession().then(async (storedSession) => {
-      if (!storedSession) return;
-      try {
-        const session = await refreshAccountSession(storedSession.accessToken);
-        if (active) await handleAuthenticated(session);
-      } catch {
+      if (!storedSession || !active || revision !== accountRevision.current) return;
+      // Show the saved account immediately; unavailable Wi-Fi must not log the user out.
+      setAccount(storedSession);
+      setFavoriteRouteIds(storedSession.favorites.routeIds);
+      setFavoriteStopIds(storedSession.favorites.stopIds);
+      const session = await recoverAccountSession(storedSession);
+      if (!active || revision !== accountRevision.current) return;
+      if (session) await handleAuthenticated(session);
+      else {
+        accountRevision.current++;
+        setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]);
         await clearSecureSession().catch(() => undefined);
       }
     });
@@ -588,31 +645,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (section !== "transport") {
+    if (section !== "transport" || transportFromFavorites) {
       return;
     }
     const timer = setTimeout(() => {
       void loadList(query);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, searchMode, section]);
-
-  if (!fontsLoaded) {
-    return null;
-  }
+    }, query.trim() ? 250 : 0);
+    return () => { clearTimeout(timer); listRequest.invalidate(); };
+  }, [query, searchMode, section, transportFromFavorites]);
 
   if (introVisible) {
     return <BrandIntro opacity={introOpacity} scale={introScale} />;
   }
 
   function openTransportHub() {
+    setTransportFromFavorites(false);
+    listRequest.invalidate(); detailRequest.invalidate();
+    setSelectedRoute(null); setSelectedStop(null); setSchedule(null); setMapScreen(null); setRouteMapPreview(null);
+    setError(null);
     setSelectedService(null);
+    setPaymentMethodsInCheckout(false);
     setActiveTab("services");
     setSection("transport");
-    setLoading(true);
+    setLoading(false); setListLoading(true);
+    void getStops().then(setStops).catch(() => undefined);
   }
 
   function navigateToTab(tab: RootTab) {
+    setTransportFromFavorites(false);
+    setProfilePanel(null); setProfileReturn(null);
+    listRequest.invalidate(); detailRequest.invalidate();
+    setLoading(false); setError(null);
+    setPaymentInitialView("choose");
+    setPaymentMethodsInCheckout(false);
     setSelectedNewsArticle(null);
     setSelectedService(null);
     setWeatherOpen(false);
@@ -625,7 +690,12 @@ export default function App() {
   }
 
   async function handleAuthenticated(session: AccountSession) {
+    accountRevision.current++;
+    preferencesRevision.current++;
     setAccount(session);
+    setLanguage(session.preferences.language === "en" ? "en" : "uk");
+    const { alert, news, transport, silence } = session.preferences;
+    setNotificationPreferences({ alert, news, transport, silence });
     setFavoriteRouteIds(session.favorites?.routeIds ?? []);
     setFavoriteStopIds(session.favorites?.stopIds ?? []);
     try {
@@ -636,30 +706,40 @@ export default function App() {
   }
 
   async function handleLogout() {
-    if (!account) return;
+    if (!account || accountMutationLocked.current) return;
+    accountMutationLocked.current = true;
+    accountRevision.current++;
     try {
       await logoutAccount(account.accessToken);
+      await clearSecureSession().catch(() => undefined);
+      setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]);
+      await setDemoPaymentCard(null).catch(() => Alert.alert("Картку не видалено. Спробуйте ще раз."));
+      setProfilePanel(null); setProfileReturn(null);
     } catch (requestError) {
       Alert.alert("Не вдалося вийти", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
       return;
+    } finally {
+      accountMutationLocked.current = false;
     }
-    await clearSecureSession().catch(() => undefined);
-    setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]); setDemoPaymentCard(null);
-    setProfilePanel(null);
   }
 
   async function handleDeleteAccount() {
-    if (!account) return;
+    if (!account || accountMutationLocked.current) return;
+    accountMutationLocked.current = true;
+    accountRevision.current++;
     try {
       await deleteAccount(account.accessToken);
+      await clearSecureSession().catch(() => undefined);
+      setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]);
+      await setDemoPaymentCard(null).catch(() => Alert.alert("Картку не видалено. Спробуйте ще раз."));
+      setProfilePanel(null); setProfileReturn(null);
+      Alert.alert("Акаунт видалено", "Дані акаунта, налаштування та обране видалено.");
     } catch (requestError) {
       Alert.alert("Не вдалося видалити", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
       return;
+    } finally {
+      accountMutationLocked.current = false;
     }
-    await clearSecureSession().catch(() => undefined);
-    setAccount(null); setFavoriteRouteIds([]); setFavoriteStopIds([]); setDemoPaymentCard(null);
-    setProfilePanel(null);
-    Alert.alert("Акаунт видалено", "Дані акаунта, налаштування та обране видалено.");
   }
 
   async function toggleFavorite(kind: "route" | "stop", id: string) {
@@ -671,6 +751,10 @@ export default function App() {
       return;
     }
 
+    if (accountMutationLocked.current) return;
+    accountMutationLocked.current = true;
+    const revision = ++accountRevision.current;
+
     const previousRoutes = favoriteRouteIds;
     const previousStops = favoriteStopIds;
     const update = (items: string[]) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
@@ -680,108 +764,197 @@ export default function App() {
     setFavoriteStopIds(nextStops);
     try {
       const favorites = await updateAccountFavorites(account.accessToken, nextRoutes, nextStops);
+      if (revision !== accountRevision.current) return;
       setFavoriteRouteIds(favorites.routeIds);
       setFavoriteStopIds(favorites.stopIds);
       const updatedSession = { ...account, favorites };
       setAccount(updatedSession);
-      void persistSecureSession(updatedSession);
+      await persistSecureSession(updatedSession).catch(() => {
+        Alert.alert("Обране збережено в акаунті", "Не вдалося оновити локальну копію. Перевірте обране після наступного входу.");
+      });
     } catch (requestError) {
+      if (revision !== accountRevision.current) return;
       setFavoriteRouteIds(previousRoutes);
       setFavoriteStopIds(previousStops);
       Alert.alert("Не вдалося зберегти", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
+    } finally {
+      accountMutationLocked.current = false;
     }
   }
 
-  function openCityService(id: CityService["id"]) {
+  async function changePreferences(nextLanguage: "uk" | "en", notifications: NotificationPreferences) {
+    if (!preferencesReady) { Alert.alert("Не вдалося прочитати збережені дані.", "Повторити відновлення"); return; }
+    if (accountMutationLocked.current) return;
+    preferencesRevision.current++;
+    if (!account) { setLanguage(nextLanguage); setNotificationPreferences(notifications); return; }
+    accountMutationLocked.current = true;
+    const revision = ++accountRevision.current;
+    setSavingPreferences(true);
+    try {
+      const preferences = await updateAccountPreferences(account.accessToken, { ...account.preferences, language: nextLanguage, ...notifications });
+      if (revision !== accountRevision.current) return;
+      const session = { ...account, preferences };
+      setAccount(session); setLanguage(nextLanguage); setNotificationPreferences(notifications);
+      await persistSecureSession(session).catch(() => {
+        Alert.alert("Налаштування збережено в акаунті", "Не вдалося оновити локальну копію сесії.");
+      });
+    } catch (requestError) {
+      Alert.alert("Не вдалося зберегти налаштування", requestError instanceof Error ? requestError.message : "Спробуйте ще раз.");
+    } finally { accountMutationLocked.current = false; setSavingPreferences(false); }
+  }
+
+  function openCityService(id: CityService["id"], paymentView: "choose" | "history" = "choose") {
     const service = CITY_SERVICES.find((item) => item.id === id);
     if (service) {
+      setPaymentMethodsInCheckout(false);
+      if (id === "transport-payment") setPaymentInitialView(paymentView);
       setSelectedService(service);
     }
   }
 
   async function loadList(searchQuery = query) {
+    const revision = listRequest.begin();
+    retryTransport.current = () => void loadList(searchQuery);
     setError(null);
+    setListLoading(true);
     try {
-      const importRequest = getLatestTransportImport();
+      void getLatestTransportImport().then(latest => { if (listRequest.isCurrent(revision)) setImportStatus(latest); }).catch(() => undefined);
       if (searchMode === "routes") {
-        const [latestImport, foundRoutes] = await Promise.all([importRequest, getRoutes(searchQuery)]);
-        setImportStatus(latestImport);
+        const foundRoutes = await getRoutes(searchQuery);
+        if (!listRequest.isCurrent(revision)) return;
         setRoutes(sortRoutesByNumber(foundRoutes));
       } else {
-        const [latestImport, foundStops] = await Promise.all([importRequest, getStops(searchQuery)]);
-        setImportStatus(latestImport);
+        const foundStops = await getStops(searchQuery);
+        if (!listRequest.isCurrent(revision)) return;
         setStops(foundStops);
       }
     } catch (requestError) {
+      if (!listRequest.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (listRequest.isCurrent(revision)) { setLoading(false); setListLoading(false); }
     }
   }
 
   async function openRoute(route: TransportRoute) {
+    listRequest.invalidate();
+    setListLoading(false);
+    const revision = detailRequest.begin();
+    retryTransport.current = () => void openRoute(route);
     setLoading(true);
     setError(null);
     setSchedule(null);
     setMapScreen(null);
     setRouteMapPreview(null);
-    setSelectedStop(null);
+    if (!transportFromFavorites) setSelectedStop(null);
     try {
       const routeDetails = await getRoute(route.id);
+      if (!detailRequest.isCurrent(revision)) return;
       setSelectedRoute(routeDetails);
+      setLoading(false);
       try {
-        setRouteMapPreview(await getRouteMap(route.id));
+        const preview = await getRouteMap(route.id);
+        if (detailRequest.isCurrent(revision)) setRouteMapPreview(preview);
       } catch {
-        setRouteMapPreview(null);
+        if (detailRequest.isCurrent(revision)) setRouteMapPreview(null);
       }
     } catch (requestError) {
+      if (!detailRequest.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (detailRequest.isCurrent(revision)) setLoading(false);
     }
   }
 
   async function openStop(stop: TransportStop) {
+    listRequest.invalidate();
+    setListLoading(false);
+    const revision = detailRequest.begin();
+    retryTransport.current = () => void openStop(stop);
     setLoading(true);
     setError(null);
     setSelectedRoute(null);
     try {
-      setSelectedStop({ stop, routes: sortRoutesByNumber(await getStopRoutes(stop.id)) });
+      const stopRoutes = await getStopRoutes(stop.id);
+      if (detailRequest.isCurrent(revision)) setSelectedStop({ stop, routes: sortRoutesByNumber(stopRoutes) });
     } catch (requestError) {
+      if (!detailRequest.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (detailRequest.isCurrent(revision)) setLoading(false);
     }
   }
 
   async function openSchedule(route: TransportRouteDetails, stop: TransportStop, date = localDate()) {
+    listRequest.invalidate();
+    setListLoading(false);
+    const revision = detailRequest.begin();
+    retryTransport.current = () => void openSchedule(route, stop, date);
     setLoading(true);
     setError(null);
     try {
-      setSchedule({ route, stop, date, departures: await getDepartures(route.id, stop.id, date) });
+      const departures = await getDepartures(route.id, stop.id, date);
+      if (detailRequest.isCurrent(revision)) setSchedule({ route, stop, date, departures });
     } catch (requestError) {
+      if (!detailRequest.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (detailRequest.isCurrent(revision)) setLoading(false);
     }
   }
 
   async function openMap(route: TransportRouteDetails, activeVariantId?: string) {
+    listRequest.invalidate();
+    setListLoading(false);
+    const revision = detailRequest.begin();
+    retryTransport.current = () => void openMap(route, activeVariantId);
     setLoading(true);
     setError(null);
     try {
       const map = routeMapPreview?.routeId === route.id ? routeMapPreview : await getRouteMap(route.id);
-      setMapScreen({ route, map, activeVariantId });
+      if (detailRequest.isCurrent(revision)) setMapScreen({ route, map, activeVariantId });
     } catch (requestError) {
+      if (!detailRequest.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (detailRequest.isCurrent(revision)) setLoading(false);
     }
   }
 
+  const screenState = { section, activeTab, profilePanel, selectedNewsArticle, weatherOpen, selectedService,
+    loading, error, selectedRoute, selectedStop, mapScreen, schedule, showDataSources, searchMode };
+  const frames = navigationPath({ section, activeTab, profilePanel, profileReturn,
+    transportFromFavorites,
+    serviceId: selectedService?.id, articleId: selectedNewsArticle?.item.sourceUrl, weatherOpen, paymentMethodsInCheckout,
+    routeId: selectedRoute?.id, stopId: selectedStop?.stop.id, mapOpen: Boolean(mapScreen), scheduleOpen: Boolean(schedule),
+    searchMode, showDataSources, loading, error: Boolean(error) });
+  function renderScreen(frame: NavigationFrame) {
+  const kind = frame.kind;
+  const section = ["transport", "transport-stops", "route", "route-map", "schedule", "stop", "data-sources", "loading", "error"].includes(kind) ? "transport" : "hub";
+  const activeTab = ["home", "services", "feed", "profile"].includes(kind) ? kind as RootTab : screenState.activeTab;
+  const profilePanel = kind.startsWith("profile:") ? kind.slice(8) as typeof screenState.profilePanel : null;
+  const selectedNewsArticle = kind === "article" ? screenState.selectedNewsArticle : null;
+  const weatherOpen = kind === "weather";
+  const selectedService = kind === "service" ? screenState.selectedService : null;
+  const loading = kind === "loading"; const error = kind === "error" ? screenState.error : null;
+  const selectedRoute = ["route", "route-map", "schedule"].includes(kind) ? screenState.selectedRoute : null;
+  const selectedStop = kind === "stop" ? screenState.selectedStop : null;
+  const mapScreen = kind === "route-map" ? screenState.mapScreen : null;
+  const schedule = kind === "schedule" ? screenState.schedule : null;
+  const showDataSources = kind === "data-sources";
+  const searchMode = kind === "transport-stops" ? "stops" : "routes";
   if (section === "hub") {
+    if (kind === "home") return <HomeScreen visible={homeVisible} onOpenTransport={openTransportHub} onOpenWeather={() => setWeatherOpen(true)} onOpenService={openCityService} onOpenArticle={item => openNewsArticle(item, "home")} onChangeTab={navigateToTab} />;
+    if (kind === "checkout-card") return <PaymentMethodsScreen
+      accountEmail={account?.preferences.email} card={demoPaymentCard}
+      storageNotice={storageErrors.card ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null}
+      isDarkTheme={isDarkTheme} backLabel="До оплати" onBack={() => setPaymentMethodsInCheckout(false)}
+      onSaveCard={async card => { await setDemoPaymentCard(card); setPaymentMethodsInCheckout(false); }}
+      onRemoveCard={() => setDemoPaymentCard(null)} />;
     if (selectedNewsArticle) {
       return <NewsArticleScreen
+        dark={isDarkTheme}
+        onOpenLink={openOfficialLink}
         item={selectedNewsArticle.item}
         backLabel={selectedNewsArticle.returnTab === "home" ? "До головної" : "До стрічки"}
         onBack={() => {
@@ -795,20 +968,30 @@ export default function App() {
     }
     if (selectedService) {
       if (selectedService.id === "events") {
-        return <CityEventsScreen onBack={() => setSelectedService(null)} />;
+        return <CityEventsScreen dark={isDarkTheme} onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "donations") {
         return <DefendersSupportScreen onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "cnap") {
-        return <CnapAppointmentDemoScreen onBack={() => setSelectedService(null)} />;
+        return <CnapAppointmentsScreen isDarkTheme={isDarkTheme} onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "transport-payment") {
-        return <TransportPaymentDemoScreen
-          card={demoPaymentCard}
-          onBack={() => setSelectedService(null)}
-          onManagePaymentMethods={() => { setSelectedService(null); setActiveTab("profile"); setProfilePanel("payment-methods"); }}
-        />;
+        return <DemoTransportPaymentScreen
+              card={demoPaymentCard}
+              tickets={demoTickets}
+              initialView={paymentInitialView}
+              backLabel={activeTab === "profile" ? "До профілю" : activeTab === "home" ? "До головної" : "До сервісів"}
+              isDarkTheme={isDarkTheme}
+              active={!paymentMethodsInCheckout}
+              historyReady={demoTicketsReady}
+              historyError={storageErrors.tickets}
+              onRetryHistory={() => setStorageRetry(value => value + 1)}
+              onTicketCreated={async ticket => { const saved = await appendDemoTicket(ticket); setDemoTickets(saved); }}
+              onClearTickets={async () => { await persistDemoTickets([]); setDemoTickets([]); }}
+              onBack={() => { setPaymentMethodsInCheckout(false); setSelectedService(null); }}
+              onManagePaymentMethods={() => setPaymentMethodsInCheckout(true)}
+            />;
       }
       if (selectedService.id === "accessibility") {
         return <AccessibilityBuildingsScreen onBack={() => setSelectedService(null)} />;
@@ -816,14 +999,18 @@ export default function App() {
       if (selectedService.id === "shelters") {
         return <SafetyMapScreen kind="shelters" onBack={() => setSelectedService(null)} />;
       }
+      if (selectedService.id === "power-outages") {
+        return <PowerOutagesScreen isDarkTheme={isDarkTheme} onBack={() => setSelectedService(null)} />;
+      }
       if (selectedService.id === "resilience") {
         return <SafetyMapScreen kind="resilience" onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "parking") {
-        return <ParkingScreen onBack={() => setSelectedService(null)} />;
+        return <ParkingDemoScreen dark={isDarkTheme} card={demoPaymentCard} onBack={() => setSelectedService(null)} />;
       }
+      if (selectedService.id === "waste") return <WasteScreen dark={isDarkTheme} onBack={() => setSelectedService(null)} />;
       if (selectedService.id === "polls") {
-        return <PollsScreen onBack={() => setSelectedService(null)} />;
+        return <PollsScreen isDarkTheme={isDarkTheme} onBack={() => setSelectedService(null)} />;
       }
       if (selectedService.id === "miniatures") {
         return <MiniaturesScreen onBack={() => setSelectedService(null)} />;
@@ -834,40 +1021,45 @@ export default function App() {
       return <NewsScreen onChangeTab={navigateToTab} onOpenArticle={(item) => openNewsArticle(item, "feed")} />;
     }
     if (activeTab === "profile") {
-      if (profilePanel === "notifications") {
-        return <NotificationSettingsScreen onBack={() => setProfilePanel(null)} />;
+      if (profilePanel === "address") {
+        return <AddressesScreen dark={isDarkTheme} onBack={() => setProfilePanel(null)} />;
       }
-      if (profilePanel === "language") {
-        return <LanguageSettingsScreen language={language} onChangeLanguage={setLanguage} onBack={() => setProfilePanel(null)} />;
+      if (profilePanel === "personal") {
+        return <PersonalDetailsScreen dark={isDarkTheme} disabled={!preferencesReady} name={displayName} onSave={next => { preferencesRevision.current++; setDisplayName(next); }} onBack={() => setProfilePanel(null)} />;
+      }
+      if (profilePanel === "settings" || profilePanel === "language") {
+        return <ProfileSettingsScreen dark={isDarkTheme} controlsDisabled={!preferencesReady} language={language} theme={themeMode} storageNotice={Object.values(storageErrors).some(Boolean) ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null} onLanguage={next => void changePreferences(next, notificationPreferences)} onTheme={next => { preferencesRevision.current++; setThemeMode(next); }} onNotifications={() => { setProfileReturn("settings"); setProfilePanel("notifications"); }} onLegal={() => { setProfileReturn("settings"); setProfilePanel("legal"); }} onAccount={() => { setProfileReturn("settings"); setProfilePanel("account"); }} onAbout={() => Alert.alert("Ужгород Цифровий", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")} onBack={closeProfilePanel} />;
+      }
+      if (profilePanel === "notifications") {
+        return <NotificationSettingsScreen enabled={notificationPreferences} saving={savingPreferences} accountConnected={Boolean(account)} onChange={(next) => void changePreferences(language, next)} onBack={closeProfilePanel} />;
       }
       if (profilePanel === "account") {
-        return <AccountScreen account={account} onAuthenticated={handleAuthenticated} onLogout={() => void handleLogout()} onDeleteAccount={() => void handleDeleteAccount()} onBack={() => setProfilePanel(null)} />;
+        return <AccountScreen account={account} onAuthenticated={handleAuthenticated} onLogout={handleLogout} onDeleteAccount={handleDeleteAccount} onBack={closeProfilePanel} />;
       }
+      if (profilePanel === "favorites") return <FavoritesScreen dark={isDarkTheme} signedIn={Boolean(account)} routeIds={favoriteRouteIds} stopIds={favoriteStopIds}
+        onBack={() => setProfilePanel(null)} onSignIn={() => { setProfileReturn("favorites"); setProfilePanel("account"); }}
+        onRoute={route => { setTransportFromFavorites(true); setActiveTab("profile"); setSection("transport"); void openRoute(route); }}
+        onStop={stop => { setTransportFromFavorites(true); setActiveTab("profile"); setSection("transport"); void openStop(stop); }} />;
       if (profilePanel === "legal") {
-        return <LegalScreen onBack={() => setProfilePanel(null)} />;
+        return <LegalScreen onBack={closeProfilePanel} />;
       }
       if (profilePanel === "payment-methods") {
         return <PaymentMethodsScreen
           accountEmail={account?.preferences.email}
           card={demoPaymentCard}
+          storageNotice={storageErrors.card ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null}
+          isDarkTheme={isDarkTheme}
           onBack={() => setProfilePanel(null)}
           onSaveCard={setDemoPaymentCard}
           onRemoveCard={() => setDemoPaymentCard(null)}
         />;
       }
-      return <ProfileScreen
-        accountEmail={account?.preferences.email}
-        favoriteSummary={account ? `${favoriteRouteIds.length} маршрутів · ${favoriteStopIds.length} зупинок` : undefined}
-        language={language}
-        isDarkTheme={isDarkTheme}
-          paymentCard={demoPaymentCard}
-        onOpenLanguage={() => setProfilePanel("language")}
-        onOpenNotifications={() => setProfilePanel("notifications")}
-        onOpenAccount={() => setProfilePanel("account")}
-          onOpenPaymentMethods={() => setProfilePanel("payment-methods")}
-        onOpenLegal={() => setProfilePanel("legal")}
-        onChangeTab={navigateToTab}
-      />;
+      return <ProfileOverviewScreen dark={isDarkTheme} name={displayName} email={account?.preferences.email} card={demoPaymentCard}
+        ticketCount={demoTickets.length} favoriteCount={account ? favoriteRouteIds.length + favoriteStopIds.length : 0}
+        onPersonal={() => setProfilePanel("personal")} onSettings={() => setProfilePanel("settings")} onAccount={() => setProfilePanel("account")}
+        onAddresses={() => setProfilePanel("address")} onCards={() => setProfilePanel("payment-methods")}
+        onTickets={() => openCityService("transport-payment", "history")} onAppointments={() => openCityService("cnap")}
+        onFavorites={() => setProfilePanel("favorites")} footer={<BottomNavigation activeTab="profile" onChangeTab={navigateToTab} />} />;
     }
     if (activeTab === "services") {
       return <CityServicesHub
@@ -876,31 +1068,25 @@ export default function App() {
       onChangeTab={navigateToTab}
       />;
     }
-    return <HomeScreen
-      onOpenTransport={openTransportHub}
-      onOpenWeather={() => setWeatherOpen(true)}
-      onOpenService={openCityService}
-      onOpenArticle={(item) => openNewsArticle(item, "home")}
-      onChangeTab={navigateToTab}
-    />;
+    return null;
   }
 
   if (loading) {
-    return <LoadingScreen />;
+    return <LoadingScreen onBack={goBack} />;
   }
 
   if (error) {
-    return <ErrorScreen message={error} onRetry={loadList} />;
+    return <ErrorScreen message={error} onRetry={() => retryTransport.current()} onBack={goBack} />;
   }
 
   if (selectedRoute) {
     if (mapScreen) {
-      return <RouteMapScreen mapScreen={mapScreen} onBack={() => setMapScreen(null)} />;
+      return <RouteMapScreen mapScreen={mapScreen} onBack={goBack} />;
     }
     if (schedule) {
       return <ScheduleDetails
         schedule={schedule}
-        onBack={() => setSchedule(null)}
+        onBack={goBack}
         onChangeDate={(date) => void openSchedule(schedule.route, schedule.stop, date)}
       />;
     }
@@ -908,12 +1094,7 @@ export default function App() {
       route={selectedRoute}
       map={routeMapPreview}
       favoriteStopIds={favoriteStopIds}
-      onBack={() => {
-        setSchedule(null);
-        setMapScreen(null);
-        setRouteMapPreview(null);
-        setSelectedRoute(null);
-      }}
+      onBack={goBack}
       onSelectStop={(stop) => void openSchedule(selectedRoute, stop)}
       onOpenMap={(variantId) => void openMap(selectedRoute, variantId)}
       onToggleFavoriteStop={(stopId) => void toggleFavorite("stop", stopId)}
@@ -924,7 +1105,7 @@ export default function App() {
     return <StopDetails
       stopScreen={selectedStop}
       isFavorite={favoriteStopIds.includes(selectedStop.stop.id)}
-      onBack={() => setSelectedStop(null)}
+      onBack={goBack}
       onOpenRoute={(route) => void openRoute(route)}
       onToggleFavorite={() => void toggleFavorite("stop", selectedStop.stop.id)}
     />;
@@ -933,20 +1114,19 @@ export default function App() {
   if (showDataSources) {
     return <DataSourcesScreen onBack={() => setShowDataSources(false)} />;
   }
+  if (searchMode === "stops") return <TransportStopsScreen dark={isDarkTheme} stops={stops} loading={listLoading} onBack={() => { setQuery(""); setSearchMode("routes"); }} onOpenRoute={route => void openRoute(route)} />;
 
   const orderedRoutes = [...routes].sort((left, right) => Number(favoriteRouteIds.includes(right.id)) - Number(favoriteRouteIds.includes(left.id)));
 
   return (
-    <SafeAreaView {...transportSwipeBack} style={styles.transportScreen}>
+    <SafeAreaView {...transportSwipeBack} bottomNavigation style={styles.transportScreen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.transportScrollContent} keyboardShouldPersistTaps="handled">
       <View style={styles.transportContent}>
-        <CivicHeader onOpenNotifications={() => navigateToTab("feed")} onOpenProfile={() => navigateToTab("profile")} />
-        <BackLink label="До сервісів" onPress={() => navigateToTab("services")} />
+        <InnerHeader title="Громадський транспорт" onBack={() => navigateToTab("services")} />
         <View style={styles.transportPageTitleRow}>
           <View style={styles.transportPageTitleCopy}>
-            <Text style={styles.transportPageTitle}>Громадський транспорт</Text>
-            <Text style={styles.transportPageDescription}>Маршрути, зупинки й плановий розклад.</Text>
+            <Text style={styles.transportPageDescription}>Маршрути, зупинки та рух автобусів онлайн.</Text>
           </View>
           <View style={[styles.transportPlanMark, importStatus?.available && styles.transportPlanMarkAvailable]}>
             <Ionicons name={importStatus?.available ? "checkmark-circle" : "time-outline"} size={13} color={importStatus?.available ? COLORS.green : "#795000"} />
@@ -977,31 +1157,35 @@ export default function App() {
             accessibilityRole="radio"
             accessibilityState={{ selected: searchMode === "routes" }}
             style={[styles.searchMode, searchMode === "routes" && styles.searchModeActive]}
-            onPress={() => setSearchMode("routes")}
+            onPress={() => setQuery("")}
           >
             <Text style={[styles.searchModeText, searchMode === "routes" && styles.searchModeTextActive]}>Маршрути</Text>
           </Pressable>
           <Pressable
             accessibilityLabel="Показати зупинки"
             accessibilityRole="radio"
-            accessibilityState={{ selected: searchMode === "stops" }}
-            style={[styles.searchMode, searchMode === "stops" && styles.searchModeActive]}
-            onPress={() => setSearchMode("stops")}
+            accessibilityState={{ selected: false }}
+            style={styles.searchMode}
+            onPress={() => { setQuery(""); setListLoading(true); setSearchMode("stops"); }}
           >
-            <Text style={[styles.searchModeText, searchMode === "stops" && styles.searchModeTextActive]}>Зупинки</Text>
+            <Text style={styles.searchModeText}>Зупинки</Text>
           </Pressable>
         </View>
       </View>
       <View style={styles.list}>
+        {listLoading && <ActivityIndicator color={COLORS.navy} accessibilityLabel="Завантажуємо транспорт" />}
+        <TransportCacheNotice value={routes} />
         <Text style={styles.transportListHeading}>{query ? "Результати пошуку" : searchMode === "routes" ? "Усі маршрути" : "Усі зупинки"}</Text>
         {!query && searchMode === "routes" && favoriteRouteIds.length > 0 ? <Text style={styles.transportSavedHint}>Обрані маршрути показано першими</Text> : null}
         {searchMode === "routes" ? orderedRoutes.map((item) => (
-          <Pressable key={item.id} accessibilityLabel={`Маршрут ${item.routeNumber}: ${item.name}`} accessibilityRole="button" style={styles.routeCard} onPress={() => void openRoute(item)}>
+          <View key={item.id} style={styles.routeCard}>
+            <Pressable accessibilityLabel={`Маршрут ${item.routeNumber}: ${item.name}`} accessibilityRole="button" style={styles.routeTapArea} onPress={() => void openRoute(item)}>
             <View style={styles.routeBadge}><Text style={styles.routeBadgeText}>{item.routeNumber}</Text></View>
             <View style={styles.routeCardCopy}><Text numberOfLines={2} style={styles.routeName}>{item.name}</Text><Text style={styles.routeCardMeta}>Схема зупинок і плановий розклад</Text></View>
-            <FavoriteButton selected={favoriteRouteIds.includes(item.id)} onPress={() => void toggleFavorite("route", item.id)} />
             <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-          </Pressable>
+            </Pressable>
+            <FavoriteButton selected={favoriteRouteIds.includes(item.id)} onPress={() => void toggleFavorite("route", item.id)} />
+          </View>
         )) : stops.map((item) => (
           <Pressable key={item.id} accessibilityLabel={`Зупинка: ${stopDisplayName(item.name)}`} accessibilityRole="button" style={styles.stopCard} onPress={() => void openStop(item)}>
             <View style={styles.stopCardText}><Text numberOfLines={2} style={styles.stopCardName}>{stopDisplayName(item.name)}</Text>{stopDisplayCode(item.name) ? <Text style={styles.stopCardAction}>Зупинка №{stopDisplayCode(item.name)}</Text> : null}</View>
@@ -1009,13 +1193,17 @@ export default function App() {
             <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
           </Pressable>
         ))}
-        {searchMode === "routes" && routes.length === 0 && <TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("stops")} />}
-        {searchMode === "stops" && stops.length === 0 && <TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => setSearchMode("routes")} />}
+        {searchMode === "routes" && routes.length === 0 && !listLoading && <TransportEmptyState hasQuery={Boolean(query)} onReset={() => setQuery("")} onShowStops={() => { setQuery(""); setListLoading(true); setSearchMode("stops"); }} />}
       </View>
       </ScrollView>
       <BottomNavigation activeTab="services" onChangeTab={navigateToTab} />
     </SafeAreaView>
   );
+  }
+  const homeVisible = section === "hub" && activeTab === "home" && !selectedService && !selectedNewsArticle && !weatherOpen;
+  return <AppThemeContext.Provider value={isDarkTheme}><ProfileIdentity.Provider value={{ dark: isDarkTheme }}><View style={{ flex: 1, backgroundColor: COLORS.mist }}>
+    <ScreenStack frames={frames} render={renderScreen} backgroundColor={COLORS.mist} retainRoots />
+  </View></ProfileIdentity.Provider></AppThemeContext.Provider>;
 }
 
 function CityServicesHub({
@@ -1028,16 +1216,17 @@ function CityServicesHub({
   onChangeTab: (tab: RootTab) => void;
 }) {
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView bottomNavigation style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.hubContent}>
-        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
+        <CivicHeader />
         <View style={styles.pageIntro}>
           <Text style={styles.pageTitle}>Сервіси</Text>
         </View>
 
         {SERVICE_CATEGORIES.map((category, index) => {
-          const services = CITY_SERVICES.filter((service) => service.category === category.id);
+        // Preserve the map and editorial section, but do not advertise unverified operational points.
+        const services = CITY_SERVICES.filter((service) => service.category === category.id && service.id !== "resilience" && service.id !== "playgrounds");
           return (
             <View key={category.id} style={index === 0 ? styles.serviceCategoryFirst : styles.serviceCategory}>
               <View style={styles.serviceGroupHeading}>
@@ -1045,7 +1234,7 @@ function CityServicesHub({
               </View>
               <View style={styles.serviceGrid}>
                 {category.id === "mobility" ? <ServiceGridCard icon="bus-outline" title="Громадський транспорт" onPress={onOpenTransport} /> : null}
-                {services.map((service) => <ServiceGridCard key={service.id} icon={service.icon} title={service.title} onPress={() => onOpenService(service)} />)}
+                {services.map((service) => <ServiceGridCard key={service.id} icon={service.icon} title={service.title} testScenario={service.testScenario} onPress={() => onOpenService(service)} />)}
               </View>
             </View>
           );
@@ -1056,23 +1245,26 @@ function CityServicesHub({
   );
 }
 
-function ServiceGridCard({ icon, title, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; onPress: () => void }) {
-  return <Pressable accessibilityLabel={`Відкрити сервіс: ${title}`} accessibilityRole="button" style={styles.serviceGridCard} onPress={onPress}>
+function ServiceGridCard({ icon, title, testScenario = false, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; testScenario?: boolean; onPress: () => void }) {
+  return <Pressable accessibilityLabel={`Відкрити сервіс: ${title}${testScenario ? ". Тестовий сценарій" : ""}`} accessibilityRole="button" style={styles.serviceGridCard} onPress={onPress}>
     <View style={styles.serviceGridIcon}><Ionicons name={icon} size={23} color={COLORS.navy} /></View>
     <View style={styles.serviceGridFooter}>
       <Text numberOfLines={2} style={styles.serviceGridTitle}>{title}</Text>
       <Ionicons name="arrow-forward" size={16} color={COLORS.navy} />
     </View>
+    {testScenario && <Text style={styles.testScenarioLabel}>Тестовий сценарій</Text>}
   </Pressable>;
 }
 
 function HomeScreen({
+  visible,
   onOpenTransport,
   onOpenWeather,
   onOpenService,
   onOpenArticle,
   onChangeTab,
 }: {
+  visible: boolean;
   onOpenTransport: () => void;
   onOpenWeather: () => void;
   onOpenService: (id: CityService["id"]) => void;
@@ -1081,24 +1273,48 @@ function HomeScreen({
 }) {
   const [newsRefreshSignal, setNewsRefreshSignal] = useState(0);
   const [refreshingNews, setRefreshingNews] = useState(false);
-  const finishNewsRefresh = useCallback(() => setRefreshingNews(false), []);
+  const [homeNow, setHomeNow] = useState(() => new Date());
+  const lastHomeRefresh = useRef(Date.now());
+  const pendingRefresh = useRef(new Set<string>());
+  const finishRefresh = useCallback((key: string) => {
+    pendingRefresh.current.delete(key);
+    if (!pendingRefresh.current.size) setRefreshingNews(false);
+  }, []);
+  const finishNewsRefresh = useCallback(() => finishRefresh("news"), [finishRefresh]);
+  const finishWeatherRefresh = useCallback(() => finishRefresh("weather"), [finishRefresh]);
+  const finishCurrencyRefresh = useCallback(() => finishRefresh("currency"), [finishRefresh]);
 
-  function refreshNews() {
-    setRefreshingNews(true);
+  function refreshNews(silent = false) {
+    if (pendingRefresh.current.size) return;
+    lastHomeRefresh.current = Date.now();
+    pendingRefresh.current = new Set(["news", "weather", "currency"]);
+    if (!silent) setRefreshingNews(true);
     setNewsRefreshSignal((value) => value + 1);
   }
 
+  useEffect(() => {
+    if (!visible) return;
+    const check = () => {
+      if (AppState.currentState !== "active") return;
+      setHomeNow(new Date());
+      if (Date.now() - lastHomeRefresh.current >= 5 * 60_000) refreshNews(true);
+    };
+    check(); const timer = setInterval(check, 60_000);
+    const listener = AppState.addEventListener("change", state => { if (state === "active") check(); });
+    return () => { clearInterval(timer); listener.remove(); };
+  }, [visible]);
+
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView bottomNavigation style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView
         contentContainerStyle={styles.dashboardContent}
-        refreshControl={<RefreshControl refreshing={refreshingNews} onRefresh={refreshNews} tintColor={COLORS.navy} />}
+        refreshControl={<RefreshControl refreshing={refreshingNews} onRefresh={() => refreshNews()} tintColor={COLORS.navy} />}
       >
-        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} onOpenProfile={() => onChangeTab("profile")} />
+        <CivicHeader />
         <View style={styles.dashboardTop}>
-          <View>
-            <Text style={styles.dashboardDay}>{formatDashboardDay()}, {formatDashboardDate()}</Text>
+          <View style={styles.dashboardDateCopy}>
+            <Text style={styles.dashboardDay}>{formatDashboardDay(homeNow)}, {formatDashboardDate(homeNow)}</Text>
           </View>
           <View style={styles.dashboardCityChip}>
             <Ionicons name="location-outline" size={16} color={COLORS.navyDark} />
@@ -1106,13 +1322,13 @@ function HomeScreen({
           </View>
         </View>
 
-        <WeatherPreview onPress={onOpenWeather} />
+        <WeatherPreview visible={visible} refreshSignal={newsRefreshSignal} onLoadEnd={finishWeatherRefresh} onPress={onOpenWeather} onOpenShelters={() => onOpenService("shelters")} />
 
         <DefendersSupportBanner onPress={() => void openOfficialLink(FEATURED_DEFENDER_DONATION.donationUrl)} />
 
         <View style={styles.dashboardSectionRow}>
-          <Text style={styles.dashboardSectionTitle}>Важливе</Text>
-          <Pressable onPress={() => onChangeTab("feed")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
+          <Text style={styles.dashboardSectionTitle}>Останні новини</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Усі новини" style={styles.smallAction} onPress={() => onChangeTab("feed")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
         </View>
         <OfficialNewsPreview
           refreshSignal={newsRefreshSignal}
@@ -1121,18 +1337,18 @@ function HomeScreen({
           onOpenArticle={onOpenArticle}
         />
 
-        <CurrencyWidget />
+        <CurrencyWidget refreshSignal={newsRefreshSignal} onLoadEnd={finishCurrencyRefresh} />
 
         <View style={styles.dashboardSectionRow}>
           <Text style={styles.dashboardSectionTitle}>Популярні сервіси</Text>
-          <Pressable onPress={() => onChangeTab("services")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Усі сервіси" style={styles.smallAction} onPress={() => onChangeTab("services")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
         </View>
         <View style={styles.dashboardServicesGrid}>
           <DashboardServiceCard icon="bus-outline" title="Рух транспорту" onPress={onOpenTransport} />
-          <DashboardServiceCard icon="card-outline" title="Оплата проїзду" onPress={() => onOpenService("transport-payment")} />
-          <DashboardServiceCard icon="car-outline" title="Паркування" onPress={() => onOpenService("parking")} />
-          <DashboardServiceCard icon="accessibility-outline" title="Доступне місто" onPress={() => onOpenService("accessibility")} />
-          <DashboardServiceCard icon="document-text-outline" title="Запис до ЦНАП" onPress={() => onOpenService("cnap")} />
+          <DashboardServiceCard icon="card-outline" title="Оплата проїзду" testScenario onPress={() => onOpenService("transport-payment")} />
+          <DashboardServiceCard icon="car-outline" title="Паркування" testScenario onPress={() => onOpenService("parking")} />
+          <DashboardServiceCard icon="accessibility-outline" title="Безбар’єрність" onPress={() => onOpenService("accessibility")} />
+          <DashboardServiceCard icon="document-text-outline" title="Запис до ЦНАП" testScenario onPress={() => onOpenService("cnap")} />
         </View>
       </ScrollView>
       <BottomNavigation activeTab="home" onChangeTab={onChangeTab} />
@@ -1162,7 +1378,7 @@ function DefendersSupportScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     void getEditorialDefenderFunds().then((editorial) => {
-      if (editorial.items.length > 0) setFunds(editorial.items);
+      setFunds(editorial.items);
     }).catch(() => {
       // The permanent mono jar and a safe empty list remain visible until the API is deployed.
     });
@@ -1172,12 +1388,7 @@ function DefendersSupportScreen({ onBack }: { onBack: () => void }) {
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.defendersContent}>
-        <CivicHeader />
-        <BackLink label="До головної" onPress={onBack} />
-        <View style={styles.defendersIntro}>
-          <Text style={styles.defendersIntroTitle}>Підтримка захисників</Text>
-          <Text style={styles.defendersIntroText}>Лише прямі, перевірені посилання на збори для підрозділів, пов’язаних із Закарпаттям.</Text>
-        </View>
+        <InnerHeader title="Підтримка захисників" onBack={onBack} />
 
         <View style={styles.featuredDonationCard}>
           <View style={styles.featuredDonationTop}>
@@ -1219,10 +1430,10 @@ function DefendersSupportScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function DashboardServiceCard({ icon, title, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; onPress: () => void }) {
-  return <Pressable style={styles.dashboardServiceCard} onPress={onPress}>
+function DashboardServiceCard({ icon, title, testScenario = false, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; testScenario?: boolean; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" style={styles.dashboardServiceCard} onPress={onPress}>
     <View style={styles.dashboardServiceIcon}><Ionicons name={icon} size={24} color={COLORS.navy} /></View>
-    <Text style={styles.dashboardServiceTitle}>{title}</Text>
+    <View style={{ flex: 1, gap: 3 }}><Text style={styles.dashboardServiceTitle}>{title}</Text>{testScenario && <Text style={styles.testScenarioLabel}>Тестовий сценарій</Text>}</View>
   </Pressable>;
 }
 
@@ -1231,14 +1442,17 @@ function OfficialNewsPreview({ refreshSignal, onLoadEnd, onOpenFeed, onOpenArtic
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    void getOfficialNews(refreshSignal > 0).then(setData).catch(() => setData(null)).finally(() => {
-      setLoading(false);
-      onLoadEnd();
+    void getOfficialNews(refreshSignal > 0).then((result) => { if (active) setData(result); }).catch(() => {
+      if (active) setData((previous) => previous ? { ...previous, stale: true } : null);
+    }).finally(() => {
+      if (active) { setLoading(false); onLoadEnd(); }
     });
+    return () => { active = false; };
   }, [onLoadEnd, refreshSignal]);
 
-  if (loading) {
+  if (loading && !data) {
     return <View style={styles.dashboardFeedCard}><ActivityIndicator color={COLORS.navy} /><Text style={styles.dashboardFeedText}>Завантажуємо офіційні новини…</Text></View>;
   }
 
@@ -1254,10 +1468,11 @@ function OfficialNewsPreview({ refreshSignal, onLoadEnd, onOpenFeed, onOpenArtic
   }
 
   return <View style={styles.homeNewsList}>
+    {data.stale ? <Text style={styles.staleData}>Збережені новини · оновлено {formatUpdatedAt(data.fetchedAt)}</Text> : null}
     {data.items.slice(0, 3).map((item) => <Pressable key={item.sourceUrl} style={styles.homeNewsItem} onPress={() => onOpenArticle(item)}>
       <View style={styles.homeNewsCopy}>
         <Text numberOfLines={2} style={styles.homeNewsTitle}>{item.title}</Text>
-        {item.publishedLabel ? <Text style={styles.homeNewsMeta}>{item.publishedLabel}</Text> : null}
+        {item.publishedLabel ? <Text style={styles.homeNewsMeta}>{newsDateLabel(item.publishedLabel)}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
     </Pressable>)}
@@ -1268,13 +1483,18 @@ function OfficialNewsPreview({ refreshSignal, onLoadEnd, onOpenFeed, onOpenArtic
   </View>;
 }
 
-function CurrencyWidget() {
+function CurrencyWidget({ refreshSignal, onLoadEnd }: { refreshSignal: number; onLoadEnd: () => void }) {
   const [data, setData] = useState<CurrencyRates | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void getCurrencyRates().then(setData).catch(() => setData(null)).finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    setLoading(true);
+    void getCurrencyRates().then((result) => { if (active) setData(result); }).catch(() => {
+      if (active) setData((previous) => previous ? { ...previous, stale: true } : null);
+    }).finally(() => { if (active) { setLoading(false); onLoadEnd(); } });
+    return () => { active = false; };
+  }, [refreshSignal, onLoadEnd]);
 
   const rates = data?.rates ?? [];
   const mainRates = rates.slice(0, 4);
@@ -1291,37 +1511,60 @@ function CurrencyWidget() {
         {mainRates.map((rate) => <View key={rate.code} style={styles.currencyRate}>
           <Text style={styles.currencyCode}>{rate.code}</Text>
           <Text style={styles.currencyValue}>{formatCurrency(rate.sell)}</Text>
-          <Text style={styles.currencyMeta}>продаж</Text>
+          <Text style={styles.currencyMeta}>{rate.reference ? "довідковий" : "продаж"}</Text>
         </View>)}
       </View> : <Text style={styles.currencyUnavailable}>{loading ? "Завантажуємо курси…" : "Курси зараз недоступні"}</Text>}
-      {data?.stale ? <Text style={styles.currencyStale}>Показано останнє доступне оновлення</Text> : null}
+      {data?.stale ? <Text style={styles.currencyStale}>Збережений курс · {formatUpdatedAt(data.fetchedAt)}</Text> : null}
     </View>
   );
 }
 
-function WeatherPreview({ onPress }: { onPress: () => void }) {
+function WeatherPreview({ visible, refreshSignal, onLoadEnd, onPress, onOpenShelters }: { visible: boolean; refreshSignal: number; onLoadEnd: () => void; onPress: () => void; onOpenShelters: () => void }) {
+  const dark = useContext(AppThemeContext) ?? false; const s = civicStyles(dark);
+  const [alertOpen, setAlertOpen] = useState(false);
+  const compact = useWindowDimensions().width < 360;
   const [data, setData] = useState<Weather | null>(null);
   const [alert, setAlert] = useState<AirAlertStatus | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(true);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    void getWeather().then(setData).catch(() => setData(null)).finally(() => setWeatherLoading(false));
-    void getAirAlertStatus().then(setAlert).catch(() => setAlert(null));
-    const timer = setInterval(() => void getAirAlertStatus().then(setAlert).catch(() => setAlert(null)), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+    if (!visible) return;
+    let active = true;
+    let checkingAlert = false;
+    setWeatherLoading(true);
+    async function loadAlert() {
+      if (!active || checkingAlert || AppState.currentState !== "active") return;
+      checkingAlert = true;
+      try { const result = await getAirAlertStatus(); if (active) { setAlert(result); setNow(Date.now()); } }
+      catch { if (active) setAlert(null); }
+      finally { checkingAlert = false; }
+    }
+    const weatherRequest = getWeather().then((result) => { if (active) setData(result); }).catch(() => {
+      if (active) setData((previous) => previous ? { ...previous, stale: true } : null);
+    }).finally(() => { if (active) setWeatherLoading(false); });
+    void Promise.all([weatherRequest, loadAlert()]).finally(() => { if (active) onLoadEnd(); });
+    const timer = setInterval(() => { setNow(Date.now()); void loadAlert(); }, 30_000);
+    const subscription = AppState.addEventListener("change", (state) => {
+      setNow(Date.now());
+      if (state === "active") void loadAlert();
+      else setAlert(null);
+    });
+    return () => { active = false; clearInterval(timer); subscription.remove(); };
+  }, [visible, refreshSignal, onLoadEnd]);
 
   const airQuality = data?.current.airQuality;
-  const alertIsActive = alert?.state === "ACTIVE";
-  return <Pressable style={styles.weatherFeatureCard} onPress={onPress}>
-    <View style={styles.weatherFeatureInfo}>
+  const alertState = isFreshSnapshot(alert, now) ? alert?.state : "UNAVAILABLE";
+  const alertIsActive = alertState === "ACTIVE";
+  return <><View style={styles.weatherFeatureCard}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Погода та якість повітря" onPress={onPress} style={styles.weatherFeatureInfo}>
       <View style={styles.weatherFeatureMain}>
-        <Text style={styles.weatherFeatureLabel}>Погода зараз</Text>
+        <Text style={styles.weatherFeatureLabel}>Погода</Text>
         <View style={styles.weatherFeatureTemperatureRow}>
-          <Text style={styles.weatherFeatureTemperature}>{data ? `${Math.round(data.current.temperatureC)}°` : "—"}</Text>
-          {data ? <Image source={{ uri: data.current.iconUrl }} style={styles.weatherFeatureIcon} /> : <Ionicons name="partly-sunny-outline" size={31} color={COLORS.navy} />}
+          <Text style={[styles.weatherFeatureTemperature, compact && styles.weatherFeatureTemperatureCompact]}>{data ? `${Math.round(data.current.temperatureC)}°` : "—"}</Text>
+          {data ? <Image source={{ uri: data.current.iconUrl }} style={[styles.weatherFeatureIcon, compact && styles.weatherFeatureIconCompact]} /> : <Ionicons name="partly-sunny-outline" size={compact ? 26 : 31} color={COLORS.navy} />}
         </View>
-        <Text style={styles.weatherFeatureCondition}>{data ? data.current.condition : weatherLoading ? "Оновлюємо дані" : "Погода недоступна"}</Text>
+        <Text style={styles.weatherFeatureCondition}>{data ? data.stale ? "Збережений прогноз" : data.current.condition : weatherLoading ? "Оновлюємо дані" : "Погода недоступна"}</Text>
       </View>
       <View style={styles.weatherFeatureAir}>
         <Ionicons name="leaf-outline" size={18} color={COLORS.green} />
@@ -1329,12 +1572,12 @@ function WeatherPreview({ onPress }: { onPress: () => void }) {
         <Text style={styles.weatherFeatureAirValue}>{airQuality ? airQualityLabel(airQuality.index) : weatherLoading ? "Оновлюємо" : "Немає даних"}</Text>
         <Text style={styles.weatherFeatureAirMeta}>{airQuality ? `PM2.5 ${Math.round(airQuality.pm25)}` : ""}</Text>
       </View>
-    </View>
-    <View style={[styles.weatherFeatureAlert, alertIsActive ? styles.weatherFeatureAlertActive : alert?.state === "CLEAR" ? styles.weatherFeatureAlertClear : styles.weatherFeatureAlertUnknown]}>
-        <Ionicons name={alertIsActive ? "warning-outline" : alert?.state === "CLEAR" ? "shield-checkmark-outline" : "help-circle-outline"} size={20} color={alertIsActive ? COLORS.danger : alert?.state === "CLEAR" ? COLORS.green : COLORS.muted} />
-      <Text style={[styles.weatherFeatureAlertText, alertIsActive && styles.weatherFeatureAlertTextActive]}>{alertIsActive ? "Тривога" : alert?.state === "CLEAR" ? "Тривоги\nнемає" : "Статус\nневідомий"}</Text>
-    </View>
-  </Pressable>;
+    </Pressable>
+    <Pressable accessibilityRole="button" accessibilityHint="Статус тривоги та укриття" onPress={() => setAlertOpen(true)} accessibilityLabel={translate(alertIsActive ? "Повітряна тривога" : alertState === "CLEAR" ? "Повітряної тривоги немає" : "Актуальний статус тривоги недоступний. Перевірте офіційні повідомлення.")} style={[styles.weatherFeatureAlert, compact && styles.weatherFeatureAlertCompact, alertIsActive ? styles.weatherFeatureAlertActive : alertState === "CLEAR" ? styles.weatherFeatureAlertClear : styles.weatherFeatureAlertUnknown]}>
+        <Ionicons name={alertIsActive ? "warning-outline" : alertState === "CLEAR" ? "shield-checkmark-outline" : "help-circle-outline"} size={20} color={alertIsActive ? COLORS.danger : alertState === "CLEAR" ? COLORS.green : COLORS.muted} />
+      <Text style={[styles.weatherFeatureAlertText, alertIsActive && styles.weatherFeatureAlertTextActive]}>{alertIsActive ? "Тривога" : alertState === "CLEAR" ? "Тривоги\nнемає" : "Статус\nневідомий"}</Text>
+    </Pressable>
+  </View><ServiceSheet dark={dark} visible={alertOpen && visible} onClose={() => setAlertOpen(false)}><Text style={s.title}>{alertIsActive ? "Повітряна тривога" : alertState === "CLEAR" ? "Повітряної тривоги немає" : "Статус тривоги невідомий"}</Text><Text style={s.body}>{alertState === "UNAVAILABLE" ? "Актуальний статус тривоги недоступний. Перевірте офіційні повідомлення." : alert?.detail}</Text>{alertState !== "UNAVAILABLE" && alert && <Text style={s.muted}>Оновлено: {formatUpdatedAt(alert.fetchedAt)}</Text>}<PrimaryButton dark={dark} title="Відкрити укриття" onPress={() => { setAlertOpen(false); onOpenShelters(); }} /></ServiceSheet></>;
 }
 
 function WeatherScreen({ onBack }: { onBack: () => void }) {
@@ -1363,13 +1606,8 @@ function WeatherScreen({ onBack }: { onBack: () => void }) {
   const day = data?.days[selectedDay];
   return <SafeAreaView {...swipeBack} style={styles.screen}>
     <StatusBar style="dark" />
-    <CivicHeader />
-    <BackLink label="На головну" onPress={onBack} />
     <ScrollView contentContainerStyle={styles.weatherContent}>
-      <View style={styles.detailIntro}>
-        <Text style={styles.detailTitle}>Погода в Ужгороді</Text>
-        <Text style={styles.detailDescription}>Актуальні умови та погодинний прогноз.</Text>
-      </View>
+      <InnerHeader title="Погода в Ужгороді" onBack={onBack} />
       {loading ? <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} /> : null}
       {error ? <View style={styles.inlineError}>
         <Text style={styles.inlineErrorText}>{error}</Text>
@@ -1433,45 +1671,57 @@ function WeatherMetric({ icon, label, value }: { icon: keyof typeof Ionicons.gly
 }
 
 function NewsScreen({ onChangeTab, onOpenArticle }: { onChangeTab: (tab: RootTab) => void; onOpenArticle: (item: OfficialNewsItem) => void }) {
+  const active = useScreenActive();
   const [data, setData] = useState<OfficialNewsList | null>(null);
   const [alertEvents, setAlertEvents] = useState<AirAlertEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(10);
+  const newsRequest = useRef(new LatestRequest()).current;
+  const eventsRequest = useRef(new LatestRequest()).current;
 
   useEffect(() => {
-    void loadNews();
+    if (!active) return;
+    if (!data) void loadNews();
     void loadAlertEvents();
-    const timer = setInterval(() => void loadAlertEvents(), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+    const timer = setInterval(() => { if (AppState.currentState === "active") void loadAlertEvents(); }, 30_000);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void loadAlertEvents(); });
+    return () => { clearInterval(timer); subscription.remove(); newsRequest.invalidate(); eventsRequest.invalidate(); };
+  }, [active]);
 
-  async function loadNews() {
+  async function loadNews(forceRefresh = false) {
+    const revision = newsRequest.begin();
     setLoading(true);
     setError(null);
     try {
-      setData(await getOfficialNews());
+      const news = await getOfficialNews(forceRefresh);
+      if (newsRequest.isCurrent(revision)) setData(news);
     } catch (requestError) {
+      if (!newsRequest.isCurrent(revision)) return;
+      setData((previous) => previous ? { ...previous, stale: true } : null);
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (newsRequest.isCurrent(revision)) setLoading(false);
     }
   }
 
   async function loadAlertEvents() {
+    const revision = eventsRequest.begin();
     try {
-      setAlertEvents((await getAirAlertEvents()).events);
+      const events = (await getAirAlertEvents()).events;
+      if (eventsRequest.isCurrent(revision)) setAlertEvents(events);
     } catch {
-      setAlertEvents([]);
+      // Preserve already loaded historical events; they are not a current alert status.
     }
   }
 
-  const feedGroups = groupFeedEntriesByDay(data?.items.slice(0, 10) ?? [], alertEvents);
+  const feedGroups = groupFeedEntriesByDay(data?.items.slice(0, visibleCount) ?? [], alertEvents);
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView bottomNavigation style={styles.screen}>
       <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.simpleTabContent}>
-        <CivicHeader onOpenProfile={() => onChangeTab("profile")} />
+      <ScrollView contentContainerStyle={styles.simpleTabContent} refreshControl={<RefreshControl refreshing={loading && Boolean(data)} onRefresh={() => { void loadNews(true); void loadAlertEvents(); }} tintColor={COLORS.navy} />}>
+        <CivicHeader />
         <View style={styles.pageIntro}>
           <Text style={styles.pageTitle}>Стрічка</Text>
         </View>
@@ -1484,7 +1734,7 @@ function NewsScreen({ onChangeTab, onOpenArticle }: { onChangeTab: (tab: RootTab
         {error && (
           <View style={styles.inlineError}>
             <Text style={styles.inlineErrorText}>{error}</Text>
-            <Pressable onPress={() => void loadNews()}>
+            <Pressable accessibilityRole="button" onPress={() => void loadNews(true)}>
               <Text style={styles.inlineRetry}>Спробувати ще раз</Text>
             </Pressable>
           </View>
@@ -1505,9 +1755,9 @@ function NewsScreen({ onChangeTab, onOpenArticle }: { onChangeTab: (tab: RootTab
           </Pressable>)}
         </View>)}
         {!loading && !error && feedGroups.length === 0 && <Text style={styles.empty}>Оновлень поки немає.</Text>}
-        {data && data.items.length > 10 ? <Pressable style={styles.newsMoreLink} onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")}>
-          <Text style={styles.newsMoreLinkText}>Усі новини на сайті міськради</Text>
-          <Ionicons name="open-outline" size={16} color={COLORS.navy} />
+        {data && data.items.length > visibleCount ? <Pressable accessibilityRole="button" style={styles.newsMoreLink} onPress={() => setVisibleCount((count) => count + 10)}>
+          <Text style={styles.newsMoreLinkText}>Показати ще новини</Text>
+          <Ionicons name="chevron-down" size={16} color={COLORS.navy} />
         </Pressable> : null}
       </ScrollView>
       <BottomNavigation activeTab="feed" onChangeTab={onChangeTab} />
@@ -1515,226 +1765,23 @@ function NewsScreen({ onChangeTab, onOpenArticle }: { onChangeTab: (tab: RootTab
   );
 }
 
-function NewsArticleScreen({ item, backLabel, onBack }: { item: OfficialNewsItem; backLabel: string; onBack: () => void }) {
-  const [article, setArticle] = useState<OfficialNewsArticle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const swipeBack = useSwipeBack(onBack);
 
-  useEffect(() => {
-    void loadArticle();
-  }, [item.sourceUrl]);
-
-  async function loadArticle() {
-    setLoading(true);
-    setError(null);
-    try {
-      setArticle(await getOfficialNewsArticle(item));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Не вдалося завантажити короткий перегляд новини.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const title = article?.title || item.title;
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.newsReaderContent}>
-      <CivicHeader />
-      <BackLink label={backLabel} onPress={onBack} />
-      <Text style={styles.newsReaderTitle}>{title}</Text>
-      <Text style={styles.newsReaderDate}>Ужгородська міська рада{article?.publishedLabel || item.publishedLabel ? ` · ${article?.publishedLabel ?? item.publishedLabel}` : ""}</Text>
-      {loading ? <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} /> : null}
-      {error ? <View style={styles.inlineError}>
-        <Text style={styles.inlineErrorText}>{error}</Text>
-        <Pressable onPress={() => void loadArticle()}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable>
-      </View> : null}
-      {article?.preview ? <Text style={styles.newsReaderPreviewText}>{article.preview}</Text> : null}
-      {!loading && !error && !article?.preview ? <Text style={styles.newsReaderAttributionText}>Повний текст цієї публікації доступний на сайті міської ради.</Text> : null}
-      <Pressable style={styles.newsReaderOriginalButton} onPress={() => void openOfficialLink(item.sourceUrl)}>
-        <Text style={styles.newsReaderOriginalButtonText}>Повний матеріал на сайті міськради</Text>
-        <Ionicons name="open-outline" size={17} color="#ffffff" />
-      </Pressable>
-    </ScrollView>
-  </SafeAreaView>;
-}
-
-function ProfileScreen({
-  accountEmail,
-  favoriteSummary,
-  language,
-  isDarkTheme,
-  paymentCard,
-  onOpenLanguage,
-  onOpenNotifications,
-  onOpenAccount,
-  onOpenPaymentMethods,
-  onOpenLegal,
-  onChangeTab,
-}: {
-  accountEmail?: string;
-  favoriteSummary?: string;
-  language: "uk" | "en";
-  isDarkTheme: boolean;
-  paymentCard: DemoPaymentCard | null;
-  onOpenLanguage: () => void;
-  onOpenNotifications: () => void;
-  onOpenAccount: () => void;
-  onOpenPaymentMethods: () => void;
-  onOpenLegal: () => void;
-  onChangeTab: (tab: RootTab) => void;
+function PaymentMethodsScreen({ card, isDarkTheme, onBack, onSaveCard, onRemoveCard, storageNotice }: {
+  accountEmail?: string; card: DemoPaymentCard | null; isDarkTheme: boolean; backLabel?: string;
+  onBack: () => void; onSaveCard: (card: DemoPaymentCard) => void | Promise<void>; onRemoveCard: () => void | Promise<void>; storageNotice?: ReactNode;
 }) {
-  return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.simpleTabContent}>
-        <CivicHeader onOpenNotifications={() => onChangeTab("feed")} />
-        <View style={styles.pageIntro}>
-          <Text style={styles.pageTitle}>Налаштування</Text>
-        </View>
-
-        <Text style={styles.profileSectionTitle}>Застосунок</Text>
-        <View style={styles.profileGroup}>
-          <ProfileRow icon="person-outline" title={accountEmail ? "Ваш акаунт" : "Створити акаунт"} value={accountEmail ? favoriteSummary : "Для збереження вибору"} onPress={onOpenAccount} />
-          <ProfileRow
-            icon="notifications-outline"
-            title="Сповіщення"
-            value="Керування категоріями"
-            onPress={onOpenNotifications}
-          />
-          <ProfileRow
-            icon="card-outline"
-            title="Способи оплати"
-            value={paymentCard ? `Картка •••• ${paymentCard.last4}` : "Apple Pay, Google Pay або картка"}
-            onPress={onOpenPaymentMethods}
-          />
-          <ProfileRow icon="language-outline" title="Мова / Language" value={language === "uk" ? "Українська" : "English · частково"} onPress={onOpenLanguage} />
-          <ProfileRow icon={isDarkTheme ? "moon-outline" : "sunny-outline"} title="Тема" value={`За системою · ${isDarkTheme ? "темна" : "світла"}`} />
-        </View>
-
-        <Text style={styles.profileSectionTitle}>Підтримка й інформація</Text>
-        <View style={styles.profileGroup}>
-          <ProfileRow icon="open-outline" title="Офіційний сайт міської ради" onPress={() => void openOfficialLink("https://rada-uzhgorod.gov.ua/")} />
-          <ProfileRow
-            icon="information-circle-outline"
-            title="Про застосунок"
-            value="Версія 1.0"
-            onPress={() => Alert.alert("Ужгород Цифровий", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")}
-          />
-          <ProfileRow icon="shield-checkmark-outline" title="Правила та приватність" value="Дані, джерела й права користувача" onPress={onOpenLegal} />
-        </View>
-
-        <Text style={styles.profileFooter}>Базові сервіси доступні без акаунта.</Text>
-      </ScrollView>
-      <BottomNavigation activeTab="profile" onChangeTab={onChangeTab} />
-    </SafeAreaView>
-  );
-}
-
-function ProfileRow({
-  icon,
-  title,
-  value,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  value?: string;
-  onPress?: () => void;
-}) {
-  return (
-    <Pressable accessibilityLabel={value ? `${title}. ${value}` : title} accessibilityRole={onPress ? "button" : undefined} disabled={!onPress} style={styles.profileRow} onPress={onPress}>
-      <View style={styles.profileRowIcon}>
-        <Ionicons name={icon} size={20} color={COLORS.navy} />
-      </View>
-      <View style={styles.profileRowText}>
-        <Text style={styles.profileRowTitle}>{title}</Text>
-        {value ? <Text style={styles.profileRowValue}>{value}</Text> : null}
-      </View>
-      {onPress ? <Ionicons name={icon === "open-outline" ? "open-outline" : "chevron-forward"} size={18} color={COLORS.muted} /> : null}
-    </Pressable>
-  );
-}
-
-function PaymentMethodsScreen({
-  accountEmail,
-  card,
-  onBack,
-  onSaveCard,
-  onRemoveCard,
-}: {
-  accountEmail?: string;
-  card: DemoPaymentCard | null;
-  onBack: () => void;
-  onSaveCard: (card: DemoPaymentCard) => void;
-  onRemoveCard: () => void;
-}) {
-  const [last4, setLast4] = useState(card?.last4 ?? "");
-  const [label, setLabel] = useState(card?.label ?? "Особиста картка");
-  const swipeBack = useSwipeBack(onBack);
-  const save = () => {
-    if (last4.length !== 4) {
-      Alert.alert("Вкажіть 4 цифри", "У поточній версії достатньо лише останніх чотирьох цифр картки.");
-      return;
-    }
-    onSaveCard({ last4, label: label.trim() || "Банківська картка" });
-  };
-
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.paymentContent} keyboardShouldPersistTaps="handled">
-      <CivicHeader />
-      <BackLink label="До налаштувань" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Способи оплати</Text>
-      <Text style={styles.settingsPageDescription}>Оберіть спосіб, який буде доступний під час оплати проїзду.</Text>
-
-      <View style={styles.paymentSafetyNote}>
-        <Ionicons name="shield-checkmark-outline" size={19} color={COLORS.navy} />
-        <Text style={styles.paymentSafetyText}>Поки доступний лише попередній перегляд: зберігаємо останні 4 цифри картки в цьому сеансі. Номер, термін дії та код безпеки не вводяться.</Text>
-      </View>
-
-      <Text style={styles.paymentSectionTitle}>Гаманець телефону</Text>
-      <View style={styles.paymentMethod}>
-        <View style={styles.paymentMethodIcon}><Ionicons name="phone-portrait-outline" size={20} color={COLORS.navy} /></View>
-        <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Apple Pay або Google Pay</Text><Text style={styles.paymentMethodText}>Буде доступно на пристроях, де гаманець налаштований.</Text></View>
-        <Ionicons name="checkmark-circle" size={20} color={COLORS.green} />
-      </View>
-
-      <Text style={styles.paymentSectionTitle}>Банківська картка</Text>
-      {card ? <View style={styles.savedPaymentCard}>
-        <View style={styles.savedPaymentCardTop}>
-          <View style={styles.savedPaymentCardIcon}><Ionicons name="card-outline" size={23} color="#ffffff" /></View>
-          <View style={styles.paymentMethodCopy}><Text style={styles.savedPaymentCardLabel}>{card.label}</Text><Text style={styles.savedPaymentCardNumber}>•••• {card.last4}</Text></View>
-          <Ionicons name="checkmark-circle" size={21} color="#dff1da" />
-        </View>
-        <Pressable accessibilityLabel="Видалити картку" accessibilityRole="button" style={styles.removePaymentCardButton} onPress={() => { onRemoveCard(); setLast4(""); }}>
-          <Ionicons name="trash-outline" size={17} color={COLORS.navy} />
-          <Text style={styles.removePaymentCardText}>Видалити картку</Text>
-        </Pressable>
-      </View> : <View style={styles.paymentCardFields}>
-        <Text style={styles.paymentFieldLabel}>Назва картки</Text>
-        <TextInput accessibilityLabel="Назва картки" onChangeText={setLabel} placeholder="Наприклад, Основна" placeholderTextColor={COLORS.muted} value={label} style={styles.paymentCardInput} />
-        <Text style={[styles.paymentFieldLabel, styles.paymentLast4Label]}>Останні 4 цифри картки</Text>
-        <TextInput accessibilityLabel="Останні чотири цифри картки" keyboardType="number-pad" maxLength={4} onChangeText={(value) => setLast4(value.replace(/\D/g, "").slice(0, 4))} placeholder="4242" placeholderTextColor={COLORS.muted} value={last4} style={styles.paymentCardInput} />
-        <Pressable accessibilityLabel="Додати картку" accessibilityRole="button" style={styles.paymentSubmitButton} onPress={save}>
-          <Ionicons name="add-circle-outline" size={19} color="#ffffff" />
-          <Text style={styles.paymentSubmitText}>Додати картку</Text>
-        </Pressable>
-      </View>}
-      <Text style={styles.paymentMethodsFootnote}>{accountEmail ? `Коли підключимо платіжного провайдера, token картки можна буде безпечно прив’язати до ${accountEmail}.` : "У реальній версії для збереженої картки знадобиться акаунт і захищений платіжний провайдер."}</Text>
-    </ScrollView>
-  </SafeAreaView>;
+  return <DemoCardScreen dark={isDarkTheme} card={card} onBack={onBack} onSave={onSaveCard} onRemove={onRemoveCard} storageNotice={storageNotice} />;
 }
 
 function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, onBack }: {
   account: AccountSession | null;
   onAuthenticated: (account: AccountSession) => void | Promise<void>;
-  onLogout: () => void;
-  onDeleteAccount: () => void;
+  onLogout: () => Promise<void>;
+  onDeleteAccount: () => Promise<void>;
   onBack: () => void;
 }) {
-  const [mode, setMode] = useState<"login" | "register">("register");
+  const dark = useContext(ProfileIdentity).dark;
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordRepeat, setPasswordRepeat] = useState("");
@@ -1743,9 +1790,11 @@ function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, on
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const actionLocked = useRef(false);
   const swipeBack = useSwipeBack(onBack);
 
   async function submit() {
+    if (actionLocked.current) return;
     if (!/^\S+@\S+\.\S+$/.test(email.trim()) || password.length < 10) {
       setError("Вкажіть коректну пошту та пароль від 10 символів.");
       return;
@@ -1754,19 +1803,22 @@ function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, on
       setError("Паролі не збігаються. Повторіть пароль ще раз.");
       return;
     }
+    actionLocked.current = true;
     setSubmitting(true); setError(null);
     try {
       await onAuthenticated(await (mode === "register" ? registerAccount(email, password) : loginAccount(email, password)));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Не вдалося виконати дію.");
-    } finally { setSubmitting(false); }
+    } finally { actionLocked.current = false; setSubmitting(false); }
   }
 
   async function updatePassword() {
+    if (actionLocked.current) return;
     if (!account || currentPassword.length < 10 || newPassword.length < 10) {
       setError("Вкажіть поточний та новий пароль щонайменше з 10 символів.");
       return;
     }
+    actionLocked.current = true;
     setSubmitting(true); setError(null);
     try {
       await onAuthenticated(await changeAccountPassword(account.accessToken, currentPassword, newPassword));
@@ -1774,40 +1826,43 @@ function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, on
       Alert.alert("Пароль змінено", "Сесію оновлено для захисту акаунта.");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Не вдалося змінити пароль.");
-    } finally { setSubmitting(false); }
+    } finally { actionLocked.current = false; setSubmitting(false); }
+  }
+
+  async function runAccountAction(action: () => Promise<void>) {
+    if (actionLocked.current) return;
+    actionLocked.current = true; setSubmitting(true);
+    try { await action(); }
+    finally { actionLocked.current = false; setSubmitting(false); }
   }
 
   function confirmDelete() {
     Alert.alert("Видалити акаунт?", "Цю дію не можна скасувати: буде видалено налаштування й обране.", [
       { text: "Скасувати", style: "cancel" },
-      { text: "Видалити", style: "destructive", onPress: onDeleteAccount },
+      { text: "Видалити", style: "destructive", onPress: () => void runAccountAction(onDeleteAccount) },
     ]);
   }
 
   return <SafeAreaView {...swipeBack} style={styles.screen}>
     <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.settingsContent} keyboardShouldPersistTaps="handled">
-      <CivicHeader />
-      <BackLink label="До налаштувань" onPress={onBack} />
+    <ServiceHeader dark={dark} title={account ? "Ваш акаунт" : "Акаунт"} onBack={onBack} />
+    <ScrollView contentContainerStyle={styles.settingsContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={styles.accountIntro}>
-        <Text style={styles.pageTitle}>{account ? "Акаунт підключено" : "Акаунт"}</Text>
+        <Text style={[styles.pageTitle, { fontSize: 24 }]}>{account ? "Акаунт підключено" : mode === "login" ? "З поверненням" : "Створити акаунт"}</Text>
         {account ? <Text style={styles.accountIntroText}>{account.preferences.email}</Text> : null}
       </View>
       {!account && <View style={styles.accountForm}>
-        <View style={styles.accountModeRow}>
-          <Pressable style={[styles.accountMode, mode === "register" && styles.accountModeActive]} onPress={() => { setMode("register"); setError(null); }}><Text style={[styles.accountModeText, mode === "register" && styles.accountModeTextActive]}>Реєстрація</Text></Pressable>
-          <Pressable style={[styles.accountMode, mode === "login" && styles.accountModeActive]} onPress={() => { setMode("login"); setError(null); }}><Text style={[styles.accountModeText, mode === "login" && styles.accountModeTextActive]}>Увійти</Text></Pressable>
-        </View>
+        <View style={styles.accountModeRow}><View style={{ flex: 1 }}><SegmentedChoice dark={dark} value={mode} options={[{ value: "login", label: "Вхід" }, { value: "register", label: "Реєстрація" }]} onChange={next => { if (!submitting) { setMode(next); setError(null); } }} /></View></View>
         <Text style={styles.paymentFieldLabel}>Електронна пошта</Text>
-        <TextInput autoCapitalize="none" keyboardType="email-address" onChangeText={setEmail} placeholder="name@example.com" placeholderTextColor={COLORS.muted} value={email} style={styles.paymentCardInput} />
+        <TextInput accessibilityLabel="Електронна пошта" autoCapitalize="none" autoCorrect={false} autoComplete="email" keyboardType="email-address" editable={!submitting} onChangeText={(value) => { setEmail(value); setError(null); }} placeholder="name@example.com" placeholderTextColor={COLORS.muted} value={email} style={styles.paymentCardInput} />
         <Text style={[styles.paymentFieldLabel, styles.accountPasswordLabel]}>Пароль</Text>
-        <TextInput onChangeText={setPassword} placeholder="Щонайменше 10 символів" placeholderTextColor={COLORS.muted} secureTextEntry value={password} style={styles.paymentCardInput} />
+        <TextInput accessibilityLabel="Пароль" autoCapitalize="none" autoCorrect={false} editable={!submitting} maxLength={128} onChangeText={(value) => { setPassword(value); setError(null); }} placeholder="Щонайменше 10 символів" placeholderTextColor={COLORS.muted} secureTextEntry value={password} style={styles.paymentCardInput} />
         {mode === "register" ? <>
           <Text style={[styles.paymentFieldLabel, styles.accountPasswordLabel]}>Повторіть пароль</Text>
-          <TextInput accessibilityLabel="Повторіть пароль" onChangeText={setPasswordRepeat} placeholder="Введіть пароль ще раз" placeholderTextColor={COLORS.muted} secureTextEntry value={passwordRepeat} style={styles.paymentCardInput} />
+          <TextInput accessibilityLabel="Повторіть пароль" autoCapitalize="none" autoCorrect={false} editable={!submitting} maxLength={128} onChangeText={(value) => { setPasswordRepeat(value); setError(null); }} placeholder="Введіть пароль ще раз" placeholderTextColor={COLORS.muted} secureTextEntry value={passwordRepeat} style={styles.paymentCardInput} />
         </> : null}
-        {error ? <Text style={styles.accountError}>{error}</Text> : null}
-        <Pressable disabled={submitting} style={styles.paymentSubmitButton} onPress={() => void submit()}>
+        {error ? <Text accessibilityRole="alert" style={styles.accountError}>{error}</Text> : null}
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting, busy: submitting }} disabled={submitting} style={styles.paymentSubmitButton} onPress={() => void submit()}>
           {submitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.paymentSubmitText}>{mode === "register" ? "Створити акаунт" : "Увійти"}</Text>}
         </Pressable>
       </View>}
@@ -1824,8 +1879,9 @@ function AccountScreen({ account, onAuthenticated, onLogout, onDeleteAccount, on
             {submitting ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.paymentSubmitText}>Змінити пароль</Text>}
           </Pressable>
         </> : <Pressable accessibilityRole="button" style={styles.accountActionButton} onPress={() => { setError(null); setShowPasswordForm(true); }}><Ionicons name="key-outline" size={19} color={COLORS.navy} /><Text style={styles.accountActionText}>Змінити пароль</Text></Pressable>}
-        <Pressable accessibilityRole="button" style={styles.accountActionButton} onPress={onLogout}><Ionicons name="log-out-outline" size={19} color={COLORS.navy} /><Text style={styles.accountActionText}>Вийти з усіх пристроїв</Text></Pressable>
-        <Pressable accessibilityRole="button" style={styles.accountDeleteButton} onPress={confirmDelete}><Ionicons name="trash-outline" size={19} color={COLORS.danger} /><Text style={styles.accountDeleteText}>Видалити акаунт і дані</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting }} disabled={submitting} style={styles.accountActionButton} onPress={() => void runAccountAction(onLogout)}><Ionicons name="log-out-outline" size={19} color={COLORS.navy} /><Text style={styles.accountActionText}>Вийти з усіх пристроїв</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting }} disabled={submitting} style={styles.accountDeleteButton} onPress={confirmDelete}><Ionicons name="trash-outline" size={19} color={COLORS.danger} /><Text style={styles.accountDeleteText}>Видалити акаунт і дані</Text></Pressable>
+        {submitting && !showPasswordForm ? <ActivityIndicator color={COLORS.navy} style={styles.inlineLoader} /> : null}
       </View>}
     </ScrollView>
   </SafeAreaView>;
@@ -1836,15 +1892,14 @@ function LegalScreen({ onBack }: { onBack: () => void }) {
   return <SafeAreaView {...swipeBack} style={styles.screen}>
     <StatusBar style="dark" />
     <ScrollView contentContainerStyle={styles.settingsContent}>
-      <CivicHeader />
-      <BackLink label="До налаштувань" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Правила та приватність</Text>
-      <Text style={styles.settingsPageDescription}>Коротка версія документів, які мають бути опубліковані за постійним посиланням до запуску в магазинах.</Text>
+      <InnerHeader title="Правила та приватність" onBack={onBack} />
+      <Text style={styles.settingsPageDescription}>Як зберігаються ваші дані та що варто знати про сервіси.</Text>
 
       <View style={styles.legalCard}>
         <View style={styles.legalCardHeading}><Ionicons name="shield-checkmark-outline" size={20} color={COLORS.navy} /><Text style={styles.legalCardTitle}>Приватність</Text></View>
-        <Text style={styles.legalCardText}>Без акаунта застосунок не збирає персональні дані. Для акаунта зберігаємо пошту, хеш пароля, технічний хеш сесії, налаштування та обране. Номер картки й CVV застосунок не отримує.</Text>
+        <Text style={styles.legalCardText}>Акаунт зберігає пошту, захищений пароль, налаштування та обране. Тестові записи, голос, квитки та історія паркування залишаються на пристрої. Для макета картки можна вводити лише тестові реквізити; повний номер, строк дії та CVV не зберігаються.</Text>
         <Text style={styles.legalCardText}>Видалити акаунт і пов’язані з ним дані можна в розділі «Акаунт».</Text>
+        <Text style={styles.legalCardText}>Збережені адреси та ім’я зберігаються лише на пристрої. Адреси можна змінити або видалити в розділі «Мої адреси». Під час перевірки світла місто, вулиця та будинок передаються нашому серверу; оператор отримує запит за містом і вулицею, без пошти, квартири чи особового рахунку.</Text>
       </View>
 
       <View style={styles.legalCard}>
@@ -1857,58 +1912,36 @@ function LegalScreen({ onBack }: { onBack: () => void }) {
         <Text style={styles.legalCardText}>Кожен сервіс показує джерело там, де воно доступне. Дані сторонніх карт і розкладів можуть оновлюватися із затримкою; до офіційної інтеграції вони не є гарантією актуальності.</Text>
       </View>
 
-      <Text style={styles.settingsFootnote}>Повні тексти: PRIVACY_POLICY_UK.md, TERMS_OF_USE_UK.md та DATA_SOURCES_AND_LIMITATIONS_UK.md у репозиторії. Перед публікацією додайте назву видавця, контактну адресу та HTTPS-посилання на ці документи.</Text>
     </ScrollView>
   </SafeAreaView>;
 }
 
-function LanguageSettingsScreen({
-  language,
-  onChangeLanguage,
-  onBack,
-}: {
-  language: "uk" | "en";
-  onChangeLanguage: (language: "uk" | "en") => void;
+
+function NotificationSettingsScreen({ enabled, saving, accountConnected, onChange, onBack }: {
+  enabled: NotificationPreferences;
+  saving: boolean;
+  accountConnected: boolean;
+  onChange: (preferences: NotificationPreferences) => void;
   onBack: () => void;
 }) {
   const swipeBack = useSwipeBack(onBack);
   return <SafeAreaView {...swipeBack} style={styles.screen}>
     <StatusBar style="dark" />
     <ScrollView contentContainerStyle={styles.settingsContent}>
-      <CivicHeader />
-      <BackLink label="До налаштувань" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Мова / Language</Text>
-      <Text style={styles.settingsPageDescription}>Українська доступна повністю. Англійська — лише приклад перемикача.</Text>
-      <View style={styles.settingsCard}>
-        <SettingsChoice icon="text-outline" title="Українська" subtitle="Основна мова інтерфейсу" selected={language === "uk"} onPress={() => onChangeLanguage("uk")} />
-        <SettingsChoice icon="globe-outline" title="English" subtitle="Переклад поступово додається" selected={language === "en"} onPress={() => onChangeLanguage("en")} />
-      </View>
-      <Text style={styles.settingsFootnote}>Повний англійський інтерфейс з’явиться після перекладу всіх екранів.</Text>
-    </ScrollView>
-  </SafeAreaView>;
-}
-
-function NotificationSettingsScreen({ onBack }: { onBack: () => void }) {
-  const [enabled, setEnabled] = useState({ alert: true, news: true, transport: false, silence: false });
-  const swipeBack = useSwipeBack(onBack);
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.settingsContent}>
-      <CivicHeader />
-      <BackLink label="До налаштувань" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Сповіщення</Text>
+      <InnerHeader title="Сповіщення" onBack={onBack} />
       <Text style={styles.settingsPageDescription}>Оберіть категорії повідомлень.</Text>
       <View style={styles.settingsSafetyNote}>
         <Ionicons name="information-circle-outline" size={18} color={COLORS.navy} />
-        <Text style={styles.settingsSafetyText}>Основа для push уже є на сервері. Системний дозвіл і реальна доставка увімкнуться після підключення Apple/Firebase та тесту на фізичних пристроях.</Text>
+        <Text style={styles.settingsSafetyText}>Push-сповіщення ще не підключено. Зараз можна зберегти бажані категорії повідомлень.</Text>
       </View>
       <View style={styles.settingsCard}>
-        <NotificationChoice icon="warning-outline" title="Повітряна тривога та відбій" subtitle="Лише після підтвердження від офіційного джерела" enabled={enabled.alert} onPress={() => setEnabled((value) => ({ ...value, alert: !value.alert }))} />
-        <NotificationChoice icon="megaphone-outline" title="Важливі новини міста" subtitle="Оголошення міськради та критичні зміни" enabled={enabled.news} onPress={() => setEnabled((value) => ({ ...value, news: !value.news }))} />
-        <NotificationChoice icon="bus-outline" title="Зміни у транспорті" subtitle="Скасування, перекриття, важливі зміни маршрутів" enabled={enabled.transport} onPress={() => setEnabled((value) => ({ ...value, transport: !value.transport }))} />
-        <NotificationChoice icon="time-outline" title="Хвилина мовчання" subtitle="Делікатне нагадування о 09:00" enabled={enabled.silence} onPress={() => setEnabled((value) => ({ ...value, silence: !value.silence }))} />
+        <NotificationChoice disabled={saving} icon="warning-outline" title="Повітряна тривога та відбій" subtitle="Лише після підтвердження від офіційного джерела" enabled={enabled.alert} onPress={() => onChange({ ...enabled, alert: !enabled.alert })} />
+        <NotificationChoice disabled={saving} icon="megaphone-outline" title="Важливі новини міста" subtitle="Оголошення міськради та критичні зміни" enabled={enabled.news} onPress={() => onChange({ ...enabled, news: !enabled.news })} />
+        <NotificationChoice disabled={saving} icon="bus-outline" title="Зміни у транспорті" subtitle="Скасування, перекриття, важливі зміни маршрутів" enabled={enabled.transport} onPress={() => onChange({ ...enabled, transport: !enabled.transport })} />
+        <NotificationChoice disabled={saving} icon="time-outline" title="Хвилина мовчання" subtitle="Делікатне нагадування о 09:00" enabled={enabled.silence} onPress={() => onChange({ ...enabled, silence: !enabled.silence })} />
       </View>
-      <Text style={styles.settingsFootnote}>Для запуску сповіщень потрібні системний дозвіл і підтверджені джерела даних.</Text>
+      {saving ? <ActivityIndicator color={COLORS.navy} style={styles.inlineLoader} /> : null}
+      <Text style={styles.settingsFootnote}>{accountConnected ? "Налаштування синхронізуються з вашим акаунтом." : "Налаштування зберігаються на цьому пристрої."}</Text>
     </ScrollView>
   </SafeAreaView>;
 }
@@ -1920,21 +1953,22 @@ function SettingsChoice({ icon, title, subtitle, selected, onPress }: {
   selected: boolean;
   onPress: () => void;
 }) {
-  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="radio" accessibilityState={{ selected }} onPress={onPress} style={[styles.settingsChoice, selected && styles.settingsChoiceActive]}>
+  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="radio" accessibilityState={{ checked: selected }} aria-checked={selected} onPress={onPress} style={[styles.settingsChoice, selected && styles.settingsChoiceActive]}>
     <View style={styles.settingsChoiceIcon}><Ionicons name={icon} size={20} color={COLORS.navy} /></View>
     <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{title}</Text><Text style={styles.settingsChoiceText}>{subtitle}</Text></View>
     <Ionicons name={selected ? "radio-button-on" : "radio-button-off"} size={21} color={selected ? COLORS.navy : COLORS.muted} />
   </Pressable>;
 }
 
-function NotificationChoice({ icon, title, subtitle, enabled, onPress }: {
+function NotificationChoice({ icon, title, subtitle, enabled, disabled = false, onPress }: {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   subtitle: string;
   enabled: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
-  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="switch" accessibilityState={{ checked: enabled }} onPress={onPress} style={styles.settingsChoice}>
+  return <Pressable accessibilityLabel={`${title}. ${subtitle}`} accessibilityRole="switch" accessibilityState={{ checked: enabled, disabled }} aria-checked={enabled} disabled={disabled} onPress={onPress} style={styles.settingsChoice}>
     <View style={styles.settingsChoiceIcon}><Ionicons name={icon} size={20} color={COLORS.navy} /></View>
     <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{title}</Text><Text style={styles.settingsChoiceText}>{subtitle}</Text></View>
     <View style={[styles.settingsSwitch, enabled && styles.settingsSwitchOn]}><View style={[styles.settingsSwitchKnob, enabled && styles.settingsSwitchKnobOn]} /></View>
@@ -1966,16 +2000,8 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
   return (
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <View style={styles.detailIntro}>
-        <View style={styles.eyebrowRow}>
-          <View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} />
-          <Text style={styles.eyebrow}>Власний каталог міста</Text>
-        </View>
-        <Text style={styles.detailTitle}>Мініскульптури Ужгорода</Text>
-        <Text style={styles.detailDescription}>Знайдіть маленькі символи міста на одній мапі та відкрийте точну локацію для прогулянки.</Text>
-      </View>
+      <View style={styles.pageHeader}>
+      <InnerHeader title="Мініскульптури Ужгорода" onBack={onBack} />
       {loading && <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} />}
       {error && (
         <View style={styles.inlineError}>
@@ -1983,6 +2009,7 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
           <Pressable onPress={() => void loadCatalog()}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable>
         </View>
       )}
+      </View>
       {data && !error && (
         <FlatList
           data={data.sculptures}
@@ -2013,7 +2040,7 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
 }
 
 function MiniatureCard({ sculpture, index }: { sculpture: MiniSculpture; index: number }) {
-  const installedAt = new Intl.DateTimeFormat("uk-UA", { year: "numeric" }).format(new Date(`${sculpture.installedAt}T12:00:00`));
+  const installedAt = new Intl.DateTimeFormat(getLocale(), { year: "numeric" }).format(new Date(`${sculpture.installedAt}T12:00:00`));
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${sculpture.latitude},${sculpture.longitude}`;
   return (
     <View style={styles.miniatureCard}>
@@ -2036,14 +2063,15 @@ function MiniatureCard({ sculpture, index }: { sculpture: MiniSculpture; index: 
 }
 
 function BottomNavigation({ activeTab, onChangeTab }: { activeTab: RootTab | null; onChangeTab: (tab: RootTab) => void }) {
+  const insets = useSafeAreaInsets();
   const items: Array<{ id: RootTab; icon: keyof typeof Ionicons.glyphMap; label: string }> = [
     { id: "home", icon: "home-outline", label: "Головна" },
     { id: "services", icon: "grid-outline", label: "Сервіси" },
     { id: "feed", icon: "notifications-outline", label: "Стрічка" },
     { id: "profile", icon: "person-outline", label: "Профіль" },
   ];
-  return <View style={styles.bottomNavigation}>{items.map((item) => (
-    <Pressable key={item.id} style={styles.tabButton} onPress={() => onChangeTab(item.id)}>
+  return <View style={[styles.bottomNavigation, { paddingBottom: Math.max(8, insets.bottom) }]}>{items.map((item) => (
+    <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={item.label} accessibilityState={{ selected: activeTab === item.id }} style={styles.tabButton} onPress={() => onChangeTab(item.id)}>
       <Ionicons name={item.icon} size={21} color={activeTab === item.id ? COLORS.navy : COLORS.muted} />
       <Text style={[styles.tabLabel, activeTab === item.id && styles.tabActive]}>{item.label}</Text>
     </Pressable>
@@ -2056,37 +2084,34 @@ function AccessibilityBuildingsScreen({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const swipeBack = useSwipeBack(onBack);
+  const requests = useRef(new LatestRequest()).current;
 
   useEffect(() => {
     const timer = setTimeout(() => void loadBuildings(query), 250);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); requests.invalidate(); };
   }, [query]);
 
   async function loadBuildings(searchQuery = query) {
+    const revision = requests.begin();
     setLoading(true);
     setError(null);
     try {
-      setData(await getAccessibleBuildings(searchQuery));
+      const result = await getAccessibleBuildings(searchQuery);
+      if (requests.isCurrent(revision)) setData(result);
     } catch (requestError) {
+      if (!requests.isCurrent(revision)) return;
       setError(requestError instanceof Error ? requestError.message : "Невідома помилка");
     } finally {
-      setLoading(false);
+      if (requests.isCurrent(revision)) setLoading(false);
     }
   }
 
   return (
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <View style={styles.detailIntro}>
-        <View style={styles.eyebrowRow}>
-          <View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} />
-          <Text style={styles.eyebrow}>Офіційний реєстр доступності</Text>
-        </View>
-        <Text style={styles.detailTitle}>Доступне місто</Text>
-        <Text style={styles.detailDescription}>Будівлі, щодо яких міська рада проводила перевірку або моніторинг доступності.</Text>
-      </View>
+      <View style={styles.pageHeader}>
+      <InnerHeader title="Безбар’єрність" onBack={onBack} />
+      <Text style={styles.cityMapHint}>Будівлі, щодо яких міська рада проводила перевірку або моніторинг доступності.</Text>
       <View style={styles.searchBox}>
         <Ionicons name="search-outline" size={20} color={COLORS.muted} />
         <TextInput
@@ -2106,6 +2131,7 @@ function AccessibilityBuildingsScreen({ onBack }: { onBack: () => void }) {
           </Pressable>
         </View>
       )}
+      </View>
       {data && !error && (
         <FlatList
           data={data.buildings}
@@ -2136,7 +2162,7 @@ function AccessibilityBuildingsScreen({ onBack }: { onBack: () => void }) {
 
 function AccessibilityBuildingCard({ building }: { building: AccessibleBuilding }) {
   const monitoredAt = building.monitoredAt
-    ? new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" })
+    ? new Intl.DateTimeFormat(getLocale(), { day: "numeric", month: "long", year: "numeric" })
       .format(new Date(`${building.monitoredAt}T12:00:00`))
     : null;
   return (
@@ -2148,319 +2174,25 @@ function AccessibilityBuildingCard({ building }: { building: AccessibleBuilding 
   );
 }
 
-function CnapAppointmentDemoScreen({ onBack }: { onBack: () => void }) {
-  const [service, setService] = useState(CNAP_SERVICE_OPTIONS[0]);
-  const [servicePickerOpen, setServicePickerOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
-  const [details, setDetails] = useState("");
-  const swipeBack = useSwipeBack(onBack);
 
-  function submitDemo() {
-    if (!details.trim()) {
-      Alert.alert("Додайте опис", "Коротко опишіть запит, щоб переглянути чернетку звернення.");
-      return;
-    }
-    Alert.alert(
-      "Звернення не надіслано",
-      "Форма поки не передає дані до ЦНАП і не зберігає введену інформацію. Після погодження API тут з’явиться безпечне подання звернення та статус опрацювання.",
-    );
-  }
 
-  return (
-    <SafeAreaView {...swipeBack} style={styles.screen}>
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.cnapContent} keyboardShouldPersistTaps="handled">
-        <CivicHeader />
-        <BackLink label="До міських сервісів" onPress={onBack} />
-        <Text style={styles.settingsPageTitle}>Запис до ЦНАП</Text>
-        <Text style={styles.settingsPageDescription}>Чернетка звернення без надсилання даних.</Text>
 
-        <View style={styles.cnapSafetyNote}>
-          <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
-          <Text style={styles.cnapSafetyNoteText}>Форма поки не надсилається. Не вводьте справжні персональні дані.</Text>
-        </View>
 
-        <View style={styles.cnapFormCard}>
-          <Text style={styles.cnapFormTitle}>Дані звернення</Text>
-          <Text style={styles.cnapFieldLabel}>Послуга *</Text>
-          <Pressable accessibilityLabel={`Обрати послугу ЦНАП. Зараз: ${service}`} accessibilityRole="button" style={styles.cnapSelect} onPress={() => setServicePickerOpen((open) => !open)}>
-            <Text style={styles.cnapSelectText}>{service}</Text>
-            <Ionicons name={servicePickerOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.navy} />
-          </Pressable>
-          {servicePickerOpen ? <View style={styles.cnapOptions}>
-            {CNAP_SERVICE_OPTIONS.map((option) => <Pressable
-              key={option}
-              accessibilityLabel={`Обрати послугу: ${option}`}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: option === service }}
-              onPress={() => { setService(option); setServicePickerOpen(false); }}
-              style={[styles.cnapOption, option === service && styles.cnapOptionActive]}
-            >
-              <Text style={[styles.cnapOptionText, option === service && styles.cnapOptionTextActive]}>{option}</Text>
-              {option === service ? <Ionicons name="checkmark" size={17} color="#ffffff" /> : null}
-            </Pressable>)}
-          </View> : null}
-
-          <Text style={styles.cnapFieldLabel}>Ім’я · необов’язково</Text>
-          <TextInput accessibilityLabel="Ім’я, необов’язково" value={name} onChangeText={setName} placeholder="Ім’я" placeholderTextColor={COLORS.muted} style={styles.cnapInput} />
-          <Text style={styles.cnapFieldLabel}>Контакт · необов’язково</Text>
-          <TextInput accessibilityLabel="Контакт, необов’язково" value={contact} onChangeText={setContact} placeholder="Електронна пошта або телефон" placeholderTextColor={COLORS.muted} style={styles.cnapInput} />
-          <Text style={styles.cnapFieldLabel}>Коротко опишіть запит *</Text>
-          <TextInput accessibilityLabel="Короткий опис запиту, обов’язково" value={details} onChangeText={setDetails} multiline numberOfLines={4} placeholder="Що саме потрібно уточнити?" placeholderTextColor={COLORS.muted} style={[styles.cnapInput, styles.cnapTextarea]} textAlignVertical="top" />
-          <Pressable accessibilityLabel="Переглянути чернетку звернення" accessibilityRole="button" style={styles.cnapSubmitButton} onPress={submitDemo}>
-            <Ionicons name="send-outline" size={18} color="#ffffff" />
-            <Text style={styles.cnapSubmitText}>Переглянути чернетку</Text>
-          </Pressable>
-          <Text style={styles.cnapFormFootnote}>Жодні дані з цієї форми не надходять до ЦНАП.</Text>
-        </View>
-
-        <Pressable accessibilityLabel="Відкрити офіційний кабінет ЦНАП" accessibilityRole="link" style={styles.cnapOfficialLink} onPress={() => void openOfficialLink("https://my.cnap.rada-uzhgorod.gov.ua/")}>
-          <Ionicons name="open-outline" size={18} color={COLORS.navy} />
-          <View style={styles.cnapOfficialLinkCopy}>
-            <Text style={styles.cnapOfficialLinkTitle}>Потрібна послуга вже зараз?</Text>
-            <Text style={styles.cnapOfficialLinkText}>Відкрити офіційний кабінет ЦНАП</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-function TransportPaymentDemoScreen({ card, onBack, onManagePaymentMethods }: { card: DemoPaymentCard | null; onBack: () => void; onManagePaymentMethods: () => void }) {
-  const [method, setMethod] = useState<"card" | "wallet">(card ? "card" : "wallet");
-  const [boardingMethod, setBoardingMethod] = useState<"qr" | "number">("qr");
-  const [busReference, setBusReference] = useState("");
-  const [ticketCreated, setTicketCreated] = useState(false);
-  const swipeBack = useSwipeBack(onBack);
-  const busReferenceLabel = busReference.trim();
-  const canContinue = (method === "wallet" || Boolean(card)) && busReferenceLabel.length > 0;
-
-  if (ticketCreated) {
-    return <SafeAreaView {...swipeBack} style={styles.screen}>
-      <StatusBar style="dark" />
-      <ScrollView contentContainerStyle={styles.paymentContent}>
-        <CivicHeader />
-        <BackLink label="До міських сервісів" onPress={onBack} />
-        <View style={styles.paymentSuccessHero}>
-          <Text style={styles.paymentSuccessTitle}>Зразок квитка</Text>
-          <Text style={styles.paymentSuccessText}>Кошти не списано. QR-код не дійсний для проїзду.</Text>
-        </View>
-        <View style={styles.demoTicket}>
-          <View style={styles.demoTicketTop}>
-            <View><Text style={styles.demoTicketLabel}>ЗРАЗОК КВИТКА</Text><Text style={styles.demoTicketTitle}>Разова поїздка · {busReferenceLabel}</Text></View>
-            <Ionicons name="bus-outline" size={27} color={COLORS.navy} />
-          </View>
-          <View style={styles.demoQr}><View style={styles.demoQrInner}><Ionicons name="qr-code-outline" size={66} color={COLORS.navyDark} /></View></View>
-          <View style={styles.demoTicketMeta}><Text style={styles.demoTicketMetaText}>{boardingMethod === "qr" ? "QR у салоні" : "Бортовий номер"}</Text><Text style={styles.demoTicketMetaText}>0,00 ₴</Text></View>
-        </View>
-        <Pressable style={styles.paymentSecondaryButton} onPress={() => setTicketCreated(false)}>
-          <Ionicons name="refresh-outline" size={18} color={COLORS.navy} />
-          <Text style={styles.paymentSecondaryButtonText}>Повернутися до оплати</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>;
-  }
-
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.paymentContent}>
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Оплата проїзду</Text>
-      <Text style={styles.settingsPageDescription}>Оберіть автобус, а потім спосіб оплати.</Text>
-      <View style={styles.paymentSafetyNote}>
-        <Ionicons name="lock-closed-outline" size={19} color={COLORS.navy} />
-        <Text style={styles.paymentSafetyText}>Оплата ще не підключена: гроші не списуються, квиток не дійсний. Не вводьте дані справжньої картки.</Text>
-      </View>
-      <View style={styles.paymentCard}>
-        <Text style={styles.paymentSectionTitle}>Оберіть автобус</Text>
-        <Pressable accessibilityLabel="Сканувати QR-код у салоні" accessibilityRole="radio" accessibilityState={{ selected: boardingMethod === "qr" }} onPress={() => setBoardingMethod("qr")} style={[styles.paymentMethod, boardingMethod === "qr" && styles.paymentMethodActive]}>
-          <View style={styles.paymentMethodIcon}><Ionicons name="qr-code-outline" size={20} color={COLORS.navy} /></View>
-          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Сканувати QR у салоні</Text><Text style={styles.paymentMethodText}>Код прив'яже квиток до автобуса</Text></View>
-          <Ionicons name={boardingMethod === "qr" ? "radio-button-on" : "radio-button-off"} size={20} color={boardingMethod === "qr" ? COLORS.navy : COLORS.muted} />
-        </Pressable>
-        <Pressable accessibilityLabel="Ввести бортовий номер автобуса" accessibilityRole="radio" accessibilityState={{ selected: boardingMethod === "number" }} onPress={() => setBoardingMethod("number")} style={[styles.paymentMethod, boardingMethod === "number" && styles.paymentMethodActive]}>
-          <View style={styles.paymentMethodIcon}><Ionicons name="bus-outline" size={20} color={COLORS.navy} /></View>
-          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Ввести бортовий номер</Text><Text style={styles.paymentMethodText}>Наприклад, АО… — якщо QR неможливо зчитати</Text></View>
-          <Ionicons name={boardingMethod === "number" ? "radio-button-on" : "radio-button-off"} size={20} color={boardingMethod === "number" ? COLORS.navy : COLORS.muted} />
-        </Pressable>
-        <View style={styles.paymentReferenceBlock}>
-          <Text style={styles.paymentFieldLabel}>{boardingMethod === "qr" ? "Код із QR" : "Бортовий номер"}</Text>
-          <TextInput
-            accessibilityLabel={boardingMethod === "qr" ? "Код із QR" : "Бортовий номер автобуса"}
-            autoCapitalize="characters"
-            onChangeText={(value) => setBusReference(value.toUpperCase())}
-            placeholder={boardingMethod === "qr" ? "Наприклад, UZH-AO123" : "Наприклад, АО123"}
-            placeholderTextColor={COLORS.muted}
-            value={busReference}
-            style={styles.paymentCardInput}
-          />
-          {boardingMethod === "qr" ? <Text style={styles.paymentReferenceHint}>Камеру підключимо разом з оператором оплати. У демо можна ввести код, надрукований поруч із QR.</Text> : null}
-        </View>
-        <Text style={styles.paymentSectionTitle}>Ваш квиток</Text>
-        <View style={styles.paymentTicketChoice}>
-          <View style={styles.paymentTicketIcon}><Ionicons name="bus-outline" size={22} color={COLORS.navy} /></View>
-          <View style={styles.paymentTicketCopy}><Text style={styles.paymentTicketTitle}>Разова поїздка</Text><Text style={styles.paymentTicketText}>{busReferenceLabel ? `Бортовий №: ${busReferenceLabel}` : "Вкажіть автобус вище"}</Text></View>
-          <Text style={styles.paymentTicketPrice}>0,00 ₴</Text>
-        </View>
-        <Text style={styles.paymentSectionTitle}>Спосіб оплати</Text>
-        <Pressable accessibilityLabel="Гаманець телефону: Apple Pay або Google Pay" accessibilityRole="radio" accessibilityState={{ selected: method === "wallet" }} onPress={() => setMethod("wallet")} style={[styles.paymentMethod, method === "wallet" && styles.paymentMethodActive]}>
-          <View style={styles.paymentMethodIcon}><Ionicons name="phone-portrait-outline" size={20} color={COLORS.navy} /></View>
-          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>Гаманець телефону</Text><Text style={styles.paymentMethodText}>Apple Pay або Google Pay</Text></View>
-          <Ionicons name={method === "wallet" ? "radio-button-on" : "radio-button-off"} size={20} color={method === "wallet" ? COLORS.navy : COLORS.muted} />
-        </Pressable>
-        <Pressable accessibilityLabel={card ? `Картка, останні цифри ${card.last4}` : "Банківська картка. Додайте картку у профілі"} accessibilityRole="radio" accessibilityState={{ selected: method === "card" }} onPress={() => setMethod("card")} style={[styles.paymentMethod, method === "card" && styles.paymentMethodActive]}>
-          <View style={styles.paymentMethodIcon}><Ionicons name="card-outline" size={20} color={COLORS.navy} /></View>
-          <View style={styles.paymentMethodCopy}><Text style={styles.paymentMethodTitle}>{card ? `Картка •••• ${card.last4}` : "Банківська картка"}</Text><Text style={styles.paymentMethodText}>{card ? `${card.label} · додано у профілі` : "Додайте картку у профілі"}</Text></View>
-          <Ionicons name={method === "card" ? "radio-button-on" : "radio-button-off"} size={20} color={method === "card" ? COLORS.navy : COLORS.muted} />
-        </Pressable>
-        {method === "card" && !card ? <Pressable style={styles.paymentAddCardRow} onPress={onManagePaymentMethods}>
-          <Ionicons name="add-circle-outline" size={19} color={COLORS.navy} />
-          <Text style={styles.paymentAddCardText}>Додати картку в профілі</Text>
-          <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-        </Pressable> : null}
-        <Pressable disabled={!canContinue} style={[styles.paymentSubmitButton, !canContinue && styles.paymentSubmitButtonDisabled]} onPress={() => canContinue ? setTicketCreated(true) : method === "card" && !card ? onManagePaymentMethods() : undefined}>
-          <Ionicons name="ticket-outline" size={19} color="#ffffff" />
-          <Text style={styles.paymentSubmitText}>{canContinue ? "Показати зразок квитка" : method === "card" && !card ? "Додати картку в профілі" : "Вкажіть автобус"}</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
-  </SafeAreaView>;
-}
-
-function CityEventsScreen({ onBack }: { onBack: () => void }) {
-  const swipeBack = useSwipeBack(onBack);
-  const [events, setEvents] = useState<CityEvent[]>(CITY_EVENTS);
-
-  useEffect(() => {
-    void getEditorialEvents().then((editorial) => {
-      if (editorial.items.length > 0) setEvents(editorial.items as CityEvent[]);
-    }).catch(() => {
-      // Keep the curated fallback visible if the editorial API is not deployed yet.
-    });
-  }, []);
-
-  const eventsByDay = events.reduce<Map<number, CityEvent[]>>((groups, event) => {
-    groups.set(event.day, [...(groups.get(event.day) ?? []), event]);
-    return groups;
-  }, new Map());
-
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.eventsContent}>
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Події в місті</Text>
-      <Text style={styles.settingsPageDescription}>Афіша Ужгорода на жовтень: концерти, театр, фестивалі й зустрічі.</Text>
-      <View style={styles.eventsSourceNote}>
-        <Ionicons name="information-circle-outline" size={19} color={COLORS.navy} />
-        <Text style={styles.eventsSourceText}>Кожна подія відкриває сторінку продажу квитків або сторінку організатора з повними деталями.</Text>
-      </View>
-      {[...eventsByDay.entries()].map(([day, events]) => <View key={day} style={styles.eventsDayGroup}>
-        <Text style={styles.eventsDayHeading}>{events[0].dateLabel}</Text>
-        <View style={styles.eventsList}>
-          {events.map((event) => <Pressable
-            key={event.id}
-            accessibilityLabel={`${event.title}. ${event.dateLabel}${event.time ? `, ${event.time}` : ""}. ${event.venue}. Відкрити джерело`}
-            accessibilityRole="link"
-            style={styles.eventRow}
-            onPress={() => void openOfficialLink(event.sourceUrl)}
-          >
-            <View style={styles.eventDateBadge}><Text style={styles.eventDateBadgeDay}>{event.day}</Text><Text style={styles.eventDateBadgeMonth}>ЖОВ</Text></View>
-            <View style={styles.eventCopy}>
-              <View style={styles.eventTopLine}><Text numberOfLines={2} style={styles.eventTitle}>{event.title}</Text><Text style={styles.eventCategory}>{event.category}</Text></View>
-              <Text numberOfLines={2} style={styles.eventMeta}>{event.time ? `${event.time} · ` : ""}{event.venue}</Text>
-            </View>
-            <Ionicons name="open-outline" size={17} color={COLORS.muted} />
-          </Pressable>)}
-        </View>
-      </View>)}
-    </ScrollView>
-  </SafeAreaView>;
-}
-
-function ParkingScreen({ onBack }: { onBack: () => void }) {
-  const swipeBack = useSwipeBack(onBack);
-  return (
-    <SafeAreaView {...swipeBack} style={styles.screen}>
-      <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <ScrollView contentContainerStyle={styles.parkingContent}>
-        <Text style={styles.settingsPageTitle}>Паркування</Text>
-        <Text style={styles.settingsPageDescription}>Офіційні сервіси для водіїв — без зайвих карток і неперевірених даних.</Text>
-
-        <View style={styles.parkingActionList}>
-          <Pressable accessibilityLabel="Пошук постанови. Відкрити офіційний сервіс" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_PORTAL_URL)}>
-            <View style={styles.parkingActionIcon}><Ionicons name="document-text-outline" size={20} color={COLORS.navy} /></View>
-            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Пошук постанови</Text><Text numberOfLines={2} style={styles.parkingActionText}>Деталі постанови та фото в офіційному сервісі міської ради.</Text></View>
-            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </Pressable>
-          <Pressable accessibilityLabel="Авто евакуювали? Відкрити офіційну інструкцію" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_EVACUATION_URL)}>
-            <View style={styles.parkingActionIcon}><Ionicons name="car-outline" size={20} color={COLORS.navy} /></View>
-            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Авто евакуювали?</Text><Text numberOfLines={2} style={styles.parkingActionText}>Порядок дій, зберігання та контакти.</Text></View>
-            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </Pressable>
-          <Pressable accessibilityLabel="Контакти інспекторів. Відкрити офіційні контакти" accessibilityRole="link" style={styles.parkingActionRow} onPress={() => void openOfficialLink(PARKING_INSPECTOR_URL)}>
-            <View style={styles.parkingActionIcon}><Ionicons name="call-outline" size={20} color={COLORS.navy} /></View>
-            <View style={styles.parkingActionCopy}><Text style={styles.parkingActionTitle}>Контакти інспекторів</Text><Text numberOfLines={2} style={styles.parkingActionText}>Повноваження, контакти й роз’яснення міста.</Text></View>
-            <Ionicons name="open-outline" size={18} color={COLORS.muted} />
-          </Pressable>
-        </View>
-
-        <View style={styles.parkingInfoNote}>
-          <Ionicons name="information-circle-outline" size={20} color={COLORS.navy} />
-          <View style={styles.parkingInfoCopy}>
-            <Text style={styles.parkingUnavailableTitle}>Майданчики та тарифи ще не опубліковані</Text>
-            <Text style={styles.parkingUnavailableText}>Додамо їх після відкритої публікації, щоб не показувати застарілі адреси чи суми.</Text>
-            <Pressable accessibilityLabel="Перевірити стан набору даних про паркування" accessibilityRole="link" hitSlop={6} onPress={() => void openOfficialLink(PARKING_DATASET_URL)}>
-              <Text style={styles.parkingUnavailableLink}>Перевірити стан набору</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-function PollsScreen({ onBack }: { onBack: () => void }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
-  const options = ["Транспорт і зупинки", "Парки та прогулянки", "Сортування відходів", "Доступність міста"];
-  const swipeBack = useSwipeBack(onBack);
-  return <SafeAreaView {...swipeBack} style={styles.screen}>
-    <StatusBar style="dark" />
-    <ScrollView contentContainerStyle={styles.settingsContent}>
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <Text style={styles.settingsPageTitle}>Опитування</Text>
-      <Text style={styles.pollQuestion}>Що покращити в місті наступним?</Text>
-      <Text style={styles.settingsPageDescription}>Оберіть один варіант, а потім підтвердьте свій вибір.</Text>
-      <View style={styles.settingsCard}>
-        {options.map((option) => <Pressable key={option} accessibilityLabel={`Варіант: ${option}`} accessibilityRole="radio" accessibilityState={{ selected: selected === option }} onPress={() => { setSelected(option); setSubmitted(false); }} style={[styles.pollOption, selected === option && styles.settingsChoiceActive]}>
-          <View style={styles.settingsChoiceCopy}><Text style={styles.settingsChoiceTitle}>{option}</Text></View>
-          <Ionicons name={selected === option ? "radio-button-on" : "radio-button-off"} size={21} color={selected === option ? COLORS.navy : COLORS.muted} />
-        </Pressable>)}
-      </View>
-      <Pressable accessibilityLabel={submitted ? "Вибір підтверджено" : "Проголосувати"} accessibilityRole="button" accessibilityState={{ disabled: !selected || submitted }} disabled={!selected || submitted} style={[styles.paymentSubmitButton, (!selected || submitted) && styles.paymentSubmitButtonDisabled]} onPress={() => setSubmitted(true)}>
-        <Ionicons name={submitted ? "checkmark-circle-outline" : "checkmark-outline"} size={19} color="#ffffff" />
-        <Text style={styles.paymentSubmitText}>{submitted ? "Вибір підтверджено" : "Проголосувати"}</Text>
-      </Pressable>
-      {selected ? <View style={styles.pollResult}><Ionicons name={submitted ? "checkmark-circle-outline" : "information-circle-outline"} size={20} color={COLORS.navy} /><Text style={styles.pollResultText}>{submitted ? `Ваш вибір «${selected}» підтверджено на цьому пристрої.` : `Ви обрали: «${selected}». Натисніть «Проголосувати», щоб підтвердити вибір.`}</Text></View> : null}
-    </ScrollView>
-  </SafeAreaView>;
-}
 
 function SafetyMapScreen({ kind, onBack }: { kind: "shelters" | "resilience"; onBack: () => void }) {
   const [points, setPoints] = useState<SafetyMapPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<SafetyMapPoint | null>(null);
+  const [refreshSignal, setRefreshSignal] = useState(0);
+  const [dataStale, setDataStale] = useState(false);
+  const [editorialSource, setEditorialSource] = useState(false);
+  const [listOpen, setListOpen] = useState(false); const [addressQuery, setAddressQuery] = useState("");
+  const loadedKind = useRef(kind);
   const swipeBack = useSwipeBack(onBack);
   const isShelters = kind === "shelters";
   const title = isShelters ? "Укриття" : "Пункти незламності";
-  const sourceLabel = isShelters ? "Джерело: Геопортал Ужгородської міської ради" : "Адреси з останнього оприлюдненого переліку";
+  const sourceLabel = editorialSource ? "Редакторський перелік. Перевірити офіційне джерело" : isShelters ? "Джерело: Геопортал Ужгородської міської ради" : "Адреси з останнього оприлюдненого переліку";
   const sourceUrl = isShelters
     ? "https://geo.rada-uzhgorod.gov.ua/map/shelter#/16:22.290283,48.608131:0.00:0.00?baseLayer=osmb&layers=3317996270789854695"
     : "https://nezlamnist.gov.ua/";
@@ -2469,9 +2201,12 @@ function SafetyMapScreen({ kind, onBack }: { kind: "shelters" | "resilience"; on
     let mounted = true;
     setLoading(true);
     setError(null);
+    if (loadedKind.current !== kind) {
+      loadedKind.current = kind; setPoints([]); setSelectedPoint(null); setEditorialSource(false); setDataStale(false);
+    }
     getSafetyMapPoints(kind)
       .then((response) => {
-        if (mounted) setPoints(response.points);
+        if (mounted) { setPoints(response.points); setSelectedPoint(previous => previous ? response.points.find(point => point.id === previous.id) ?? null : null); setDataStale(response.stale); setEditorialSource(response.source === "editorial"); }
       })
       .catch((requestError) => {
         if (mounted) setError(requestError instanceof Error ? requestError.message : "Не вдалося завантажити позначки.");
@@ -2480,23 +2215,44 @@ function SafetyMapScreen({ kind, onBack }: { kind: "shelters" | "resilience"; on
         if (mounted) setLoading(false);
       });
     return () => { mounted = false; };
-  }, [kind]);
+  }, [kind, refreshSignal]);
 
   return <SafeAreaView {...swipeBack} style={styles.cityMapScreen}>
     <StatusBar style="dark" />
     <View style={styles.cityMapHeader}>
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
-      <Text style={styles.cityMapTitle}>{title}</Text>
+      <InnerHeader title={title} onBack={onBack} />
+      <Pressable accessibilityRole="button" accessibilityLabel={listOpen ? "Показати мапу" : "Список адрес"} style={styles.smallAction} onPress={() => setListOpen(value => !value)}><Ionicons name={listOpen ? "map-outline" : "list-outline"} size={20} color={COLORS.navy} /><Text style={styles.inlineRetry}>{listOpen ? "Показати мапу" : "Список адрес"}</Text></Pressable>
+      {listOpen && <View style={styles.searchBox}><Ionicons name="search-outline" size={18} color={COLORS.muted} /><TextInput value={addressQuery} onChangeText={setAddressQuery} placeholder="Назва або адреса" accessibilityLabel="Пошук адрес укриттів" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View>}
       <Text style={styles.cityMapHint}>{loading ? "Завантажуємо позначки…" : error ? "Позначки тимчасово недоступні" : `${points.length} позначок на мапі`}</Text>
+      {isShelters && <Text style={styles.cityMapHint}>Позначка не підтверджує, що вхід зараз відкритий. Перевірте доступність укриття заздалегідь.</Text>}
+      {error ? <Pressable accessibilityRole="button" onPress={() => setRefreshSignal((value) => value + 1)}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable> : null}
+      {!loading && !error ? <Pressable accessibilityRole="button" accessibilityLabel="Оновити позначки" style={styles.smallAction} onPress={() => setRefreshSignal(value => value + 1)}><Ionicons name="refresh" size={20} color={COLORS.navy} /></Pressable> : null}
+      {!loading && !error && points.length === 0 ? <Text style={styles.cityMapHint}>У цьому переліку поки немає точок. Перевірте офіційну карту.</Text> : null}
+      {(dataStale || !!error) && points.length > 0 ? <Text style={styles.staleData}>Збережений перелік. Актуальність перевіряйте в офіційному джерелі.</Text> : null}
     </View>
     <View style={styles.cityMapCanvas}>
-      <OfficialLayerMap
-        tileTemplate={isShelters ? "https://geo.rada-uzhgorod.gov.ua/map/rtile/3317996270789854695/ua/{z}/{x}/{y}.png" : undefined}
+      {listOpen ? <FlatList data={points.filter(point => `${point.name} ${point.address}`.toLocaleLowerCase("uk").includes(addressQuery.trim().toLocaleLowerCase("uk")))} keyExtractor={point => point.id} contentContainerStyle={{ padding: PAGE_LAYOUT.gutter }} ListEmptyComponent={<Text style={styles.empty}>Адрес не знайдено. Спробуйте іншу назву.</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`${item.name}. ${item.address}`} style={styles.profileRow} onPress={() => setSelectedPoint(item)}><View style={{ flex: 1 }}><Text translate={false} style={styles.profileRowTitle}>{item.name}</Text><Text translate={false} style={styles.profileRowValue}>{item.address || "Адресу не вказано в джерелі"}</Text></View><Ionicons name="chevron-forward" size={18} color={COLORS.navy} /></Pressable>} /> : <OfficialLayerMap
+        tileTemplate={isShelters && !editorialSource ? "https://geo.rada-uzhgorod.gov.ua/map/rtile/3317996270789854695/ua/{z}/{x}/{y}.png" : undefined}
         points={points}
+        onPointPress={setSelectedPoint}
         pinColor={isShelters ? "#c2410c" : "#1d4ed8"}
-      />
+      />}
     </View>
+    {selectedPoint ? <View style={styles.cityMapSelection}>
+      <View style={styles.cityMapSelectionHeading}>
+        <Text translate={false} style={styles.cityMapSelectionTitle}>{selectedPoint.name}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Закрити адресу" style={styles.smallAction} onPress={() => setSelectedPoint(null)}><Ionicons name="close" size={21} color={COLORS.navy} /></Pressable>
+      </View>
+      <ScrollView style={{ maxHeight: 160 }}>
+        <Text translate={false} selectable style={styles.cityMapSelectionAddress}>{selectedPoint.address || "Адресу не вказано в джерелі"}</Text>
+        {selectedPoint.description ? <Text translate={false} selectable style={styles.cityMapSelectionAddress}>{selectedPoint.description}</Text> : null}
+        {selectedPoint.verifiedAt ? <Text style={styles.cityMapHint}>Перевірено: {new Date(`${selectedPoint.verifiedAt}T12:00:00Z`).toLocaleDateString(getLocale())}</Text> : null}
+        {selectedPoint.sourceUrl ? <Pressable accessibilityRole="button" style={styles.cityMapDirections} onPress={() => void openOfficialLink(selectedPoint.sourceUrl!)}><Text style={styles.cityMapDirectionsText}>Джерело інформації ↗</Text></Pressable> : null}
+      </ScrollView>
+      <Pressable accessibilityRole="button" accessibilityHint="Відкриє зовнішню карту. Маршрут не гарантує безпечного проходу чи доступності входу." style={styles.cityMapDirections} onPress={() => void openOfficialLink(`https://www.google.com/maps/dir/?api=1&destination=${selectedPoint.latitude},${selectedPoint.longitude}&travelmode=walking`)}>
+        <Ionicons name="navigate-outline" size={18} color={COLORS.navy} /><Text style={styles.cityMapDirectionsText}>Прокласти маршрут</Text><Ionicons name="open-outline" size={16} color={COLORS.navy} />
+      </Pressable>
+    </View> : null}
     <Pressable style={styles.cityMapSource} onPress={() => void openOfficialLink(sourceUrl)}>
       <Ionicons name="information-circle-outline" size={17} color={COLORS.navy} />
       <Text style={styles.cityMapSourceText}>{sourceLabel}{!isShelters ? ". Перед виходом перевірте, чи пункт розгорнули." : ""}</Text>
@@ -2510,9 +2266,9 @@ function CityServiceDetails({ service, onBack }: { service: CityService; onBack:
   return (
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
       <ScrollView contentContainerStyle={styles.serviceDetailsContent}>
+        <CivicHeader />
+        <BackLink label="До сервісів" onPress={onBack} />
         <View style={styles.serviceDetailsIcon}>
           <Ionicons name={service.icon} size={31} color={COLORS.navy} />
         </View>
@@ -2542,9 +2298,9 @@ function SilenceScreen({ onBack }: { onBack: () => void }) {
   return (
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До міських сервісів" onPress={onBack} />
       <ScrollView contentContainerStyle={styles.silenceContent}>
+        <CivicHeader />
+        <BackLink label="До сервісів" onPress={onBack} />
         <View style={styles.detailIntro}>
           <View style={styles.eyebrowRow}>
             <View style={styles.eyebrowDot} />
@@ -2601,16 +2357,7 @@ function SilencePanel() {
 }
 
 function getKyivTime(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Kyiv",
-    hour: "2-digit",
-    hourCycle: "h23",
-    minute: "2-digit",
-  }).formatToParts(date);
-  return {
-    hours: Number(parts.find((part) => part.type === "hour")?.value ?? 0),
-    minutes: Number(parts.find((part) => part.type === "minute")?.value ?? 0),
-  };
+  return cityClock(date);
 }
 
 async function openOfficialLink(url: string) {
@@ -2631,15 +2378,9 @@ function DataSourcesScreen({ onBack }: { onBack: () => void }) {
   return (
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До транспорту" onPress={onBack} />
-      <View style={styles.detailIntro}>
-        <View style={styles.eyebrowRow}><View style={[styles.eyebrowDot, styles.eyebrowDotGreen]} /><Text style={styles.eyebrow}>Прозорість даних</Text></View>
-        <Text style={styles.detailTitle}>Джерела даних</Text>
-        <Text style={styles.detailDescription}>Звідки застосунок бере маршрути, зупинки та плановий розклад.</Text>
-      </View>
       <ScrollView contentContainerStyle={styles.sourcesList}>
-        <View style={styles.sourceCard}>
+      <InnerHeader title="Джерела даних" onBack={onBack} />
+        <View style={[styles.sourceCard, styles.sourcesFirstCard]}>
           <Text style={styles.sourceCardTitle}>Маршрути, зупинки й розклад</Text>
           <Text style={styles.sourceText}>Офіційні відкриті дані Ужгородської міської ради у форматі GTFS.</Text>
           <Text style={styles.sourceUrl}>track.ua-gis.com/gtfs/uzhhorod/static.zip</Text>
@@ -2650,8 +2391,8 @@ function DataSourcesScreen({ onBack }: { onBack: () => void }) {
           <Text style={styles.sourceUrl}>creativecommons.org/licenses/by/4.0</Text>
         </View>
         <View style={styles.sourceCard}>
-          <Text style={styles.sourceCardTitle}>Живі GPS-позиції</Text>
-          <Text style={styles.sourceText}>Показуємо на карті маршруту з публічного DozoR. Дані можуть надходити із короткою затримкою.</Text>
+          <Text style={styles.sourceCardTitle}>GPS-позиції з DozoR</Text>
+          <Text style={styles.sourceText}>Показуємо координати, отримані від DozoR. Час отримання відповіді не є часом GPS-виміру; затримка джерела невідома. Час на зупинках — за розкладом.</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -2721,8 +2462,8 @@ function StopDetails({
   return (
     <SafeAreaView {...swipeBack} style={styles.transportDetailScreen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label="До зупинок" onPress={onBack} />
+      <View style={styles.insetContent}>
+      <InnerHeader title="Зупинка" onBack={onBack} />
       <View style={styles.stopDetailsHeading}>
         <Text style={styles.stopDetailsTitle}>{stopDisplayName(stopScreen.stop.name)}</Text>
         <FavoriteButton selected={isFavorite} onPress={onToggleFavorite} />
@@ -2744,6 +2485,7 @@ function StopDetails({
         )}
         ListEmptyComponent={<Text style={styles.empty}>Для цієї зупинки маршрутів поки немає.</Text>}
       />
+      </View>
     </SafeAreaView>
   );
 }
@@ -2780,8 +2522,8 @@ function RouteDetails({
     <SafeAreaView {...swipeBack} style={styles.screen}>
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.routeDetailsContent}>
-        <CivicHeader />
-        <BackLink label="Усі маршрути" onPress={onBack} />
+        <InnerHeader title="Маршрут" onBack={onBack} />
+        <TransportCacheNotice value={route} />
         <View style={styles.routeDetailHero}>
           <View style={styles.routeDetailTopLine}>
             <View style={styles.routeDetailRouteIdentity}>
@@ -2799,7 +2541,7 @@ function RouteDetails({
           {termini && <Text style={styles.routeDetailTermini}>{termini}</Text>}
         </View>
         {map && (
-          <Pressable accessibilityLabel="Відкрити карту маршруту" accessibilityRole="button" style={styles.routeMapPreview} onPress={() => onOpenMap(direction?.id)}>
+          <Pressable accessibilityLabel="Дивитися рух автобусів" accessibilityHint="GPS-позиції показуємо, коли вони доступні. Час на зупинках — за розкладом." accessibilityRole="button" style={styles.routeMapPreview} onPress={() => onOpenMap(direction?.id)}>
             <RouteMap
               activeVariantId={direction?.id}
               map={map}
@@ -2808,17 +2550,17 @@ function RouteDetails({
               preview
             />
             <View style={styles.routeMapPreviewLabel}>
-              <Text style={styles.routeMapPreviewLabelText}>Карта маршруту · розгорнути</Text>
+              <Text style={styles.routeMapPreviewLabelText}>Дивитися рух автобусів</Text>
             </View>
           </Pressable>
         )}
-        {!map && <Pressable accessibilityLabel="Показати маршрут на карті" accessibilityRole="button" style={styles.mapButton} onPress={() => onOpenMap(direction?.id)}>
+        {!map && <Pressable accessibilityLabel="Дивитися рух автобусів" accessibilityHint="GPS-позиції показуємо, коли вони доступні. Час на зупинках — за розкладом." accessibilityRole="button" style={styles.mapButton} onPress={() => onOpenMap(direction?.id)}>
           <Ionicons name="map-outline" size={18} color={COLORS.navy} />
-          <Text style={styles.mapButtonText}>{map ? "Відкрити карту маршруту" : "Показати маршрут на карті"}</Text>
+          <Text style={styles.mapButtonText}>Дивитися рух автобусів</Text>
           <Ionicons name="chevron-forward" size={16} color={COLORS.navy} />
         </Pressable>}
         <View style={styles.stopsIntro}>
-          <View>
+          <View style={styles.stopsIntroCopy}>
             <Text style={styles.stopsHeading}>Зупинки на лінії</Text>
             <Text style={styles.hint}>Оберіть зупинку, щоб переглянути планові відправлення.</Text>
           </View>
@@ -2843,18 +2585,20 @@ function RouteDetails({
           </View>
           <View style={styles.variant}>
             {direction.stops.map((stop, index) => (
-              <Pressable key={stop.id} style={styles.stopRow} onPress={() => onSelectStop(stop)}>
+              <View key={`${direction.id}-${stop.id}-${index}`} style={[styles.stopRow, { paddingVertical: 4 }]}>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Зупинка: ${stopDisplayName(stop.name)}`} style={styles.routeTapArea} onPress={() => onSelectStop(stop)}>
                 <View style={styles.stopSequence}>
                   <View style={[styles.stopDot, index === 0 && styles.stopDotStart, index === direction.stops.length - 1 && styles.stopDotEnd]} />
                   {index < direction.stops.length - 1 && <View style={styles.stopLine} />}
                 </View>
                 <Text style={styles.stopName}>{stopDisplayName(stop.name)}</Text>
-                <FavoriteButton selected={favoriteStopIds.includes(stop.id)} onPress={() => onToggleFavoriteStop(stop.id)} />
                 <View style={styles.stopScheduleLink}>
                   <Text style={styles.stopSchedule}>Розклад</Text>
                   <Ionicons name="chevron-forward" size={14} color={COLORS.navy} />
                 </View>
-              </Pressable>
+                </Pressable>
+                <FavoriteButton selected={favoriteStopIds.includes(stop.id)} onPress={() => onToggleFavoriteStop(stop.id)} />
+              </View>
             ))}
           </View>
         </> : <View style={styles.variant}><Text style={styles.hint}>Для цього маршруту поки немає списку зупинок.</Text></View>}
@@ -2872,11 +2616,16 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
   const [departureError, setDepartureError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [vehiclePositions, setVehiclePositions] = useState<TransportVehiclePositions | null>(null);
+  const [gpsStatusHeight, setGpsStatusHeight] = useState(32);
+  const departureRequest = useRef(new LatestRequest()).current;
+  const liveState = transportLiveState(vehiclePositions, now.getTime());
+  const gpsFresh = liveState === "live" || liveState === "empty";
   const direction = variants[directionIndex] ?? variants[0];
   const destination = direction?.stops[direction.stops.length - 1]?.name;
   const region = getInitialRegion(mapScreen.map, direction?.stops, direction?.id);
 
   useEffect(() => {
+    departureRequest.invalidate();
     setDirectionIndex(defaultDirectionIndex);
     setSelectedStop(null);
     setDepartures(null);
@@ -2884,28 +2633,38 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
   }, [defaultDirectionIndex, mapScreen.route.id]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60_000);
+    const timer = setInterval(() => setNow(new Date()), 10_000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
     let active = true;
+    let loadingPositions = false;
     const loadVehiclePositions = async () => {
+      if (!active || loadingPositions || AppState.currentState !== "active") return;
+      loadingPositions = true;
       try {
         const positions = await getVehiclePositions(mapScreen.route.routeNumber);
         if (active) {
           setVehiclePositions(positions);
+          setNow(new Date());
         }
       } catch {
         if (active) {
           setVehiclePositions({ available: false, stale: false, fetchedAt: new Date().toISOString(), vehicles: [] });
         }
-      }
+      } finally { loadingPositions = false; }
     };
     void loadVehiclePositions();
     const timer = setInterval(() => void loadVehiclePositions(), 20_000);
+    const subscription = AppState.addEventListener("change", (state) => {
+      setNow(new Date());
+      if (state === "active") void loadVehiclePositions();
+    });
     return () => {
       active = false;
+      departureRequest.invalidate();
+      subscription.remove();
       clearInterval(timer);
     };
   }, [mapScreen.route.routeNumber]);
@@ -2914,6 +2673,7 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
     if (variants.length < 2) {
       return;
     }
+    departureRequest.invalidate();
     setDirectionIndex((index) => (index + 1) % variants.length);
     setSelectedStop(null);
     setDepartures(null);
@@ -2921,13 +2681,16 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
   }
 
   async function selectStop(stop: TransportStop) {
+    const revision = departureRequest.begin();
     setSelectedStop(stop);
     setDepartures(null);
     setDepartureError(null);
     try {
       const allDepartures = await getDepartures(mapScreen.route.id, stop.id, localDate());
+      if (!departureRequest.isCurrent(revision)) return;
       setDepartures(direction ? allDepartures.filter((departure) => departure.routeVariantId === direction.id) : allDepartures);
     } catch (requestError) {
+      if (!departureRequest.isCurrent(revision)) return;
       setDepartureError(requestError instanceof Error ? requestError.message : "Не вдалося отримати плановий розклад.");
     }
   }
@@ -2940,7 +2703,7 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
       <View style={styles.mapHeader}>
         <BackLink label={`До маршруту ${mapScreen.route.routeNumber}`} onPress={onBack} />
         <Text style={styles.mapTitle}>{mapScreen.route.name}</Text>
-        <Text style={styles.mapHint}>Натисніть зупинку, щоб побачити розклад.</Text>
+        <Text style={styles.mapHint}>Рух автобусів онлайн · час на зупинках — за розкладом.</Text>
       </View>
       {direction ? <View style={styles.mapDirectionSwitch}>
         <View style={styles.mapDirectionCopy}>
@@ -2963,22 +2726,23 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           region={region}
           selectedStopId={selectedStop?.id}
           stops={direction?.stops}
-          vehicles={vehiclePositions?.vehicles}
+          vehicles={gpsFresh ? vehiclePositions?.vehicles : []}
           onStopPress={(stop) => void selectStop(stop)}
         />
-        {vehiclePositions ? <View pointerEvents="none" style={styles.mapGpsStatus}>
-          <View style={[styles.mapGpsDot, vehiclePositions.available ? (vehiclePositions.stale ? styles.mapGpsDotStale : styles.mapGpsDotLive) : styles.mapGpsDotOffline]} />
+        <View pointerEvents="none" style={styles.mapGpsStatus} onLayout={event => setGpsStatusHeight(event.nativeEvent.layout.height)}>
+          <View style={[styles.mapGpsDot, liveState === "live" ? styles.mapGpsDotLive : liveState === "stale" ? styles.mapGpsDotStale : styles.mapGpsDotOffline]} />
+          <View style={{ flexShrink: 1, gap: 2 }}>
           <Text style={styles.mapGpsStatusText}>
-            {vehiclePositions.available
-              ? (vehiclePositions.stale
-                ? "GPS: дані застаріли"
-                : vehiclePositions.vehicles.length > 0
-                  ? `GPS · ${vehiclePositions.vehicles.length} ${pluralizeBus(vehiclePositions.vehicles.length)}`
-                  : "GPS · автобусів немає")
-              : "GPS недоступний"}
+            {liveState === "live" ? `Позиції з DozoR · ${vehiclePositions!.vehicles.length} ${pluralizeBus(vehiclePositions!.vehicles.length)}`
+              : liveState === "empty" ? "Джерело не передало позицій автобусів"
+              : liveState === "stale" ? "Не вдалося оновити позиції автобусів"
+              : liveState === "loading" ? "Завантажуємо рух автобусів…"
+              : "Позиції автобусів недоступні"}
           </Text>
-        </View> : null}
-        {selectedStop ? <View style={[styles.mapStopCard, vehiclePositions && styles.mapStopCardWithGps]}>
+          {(liveState === "live" || liveState === "empty") && <Text style={styles.mapGpsStatusText}>Отримано: {formatUpdatedAt(vehiclePositions!.fetchedAt)}</Text>}
+          </View>
+        </View>
+        {selectedStop ? <View style={[styles.mapStopCard, { top: 12 + gpsStatusHeight + 10 }]}>
           <View style={styles.mapStopCardTop}>
             <View style={styles.mapStopIcon}><Ionicons name="bus-outline" size={18} color={COLORS.navy} /></View>
             <View style={styles.mapStopCopy}>
@@ -2993,9 +2757,9 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           {nextDepartures.length > 0 ? <View style={styles.mapStopSchedule}>
             <Text style={styles.mapStopScheduleLabel}>Найближчі за розкладом</Text>
             <View style={styles.mapStopTimes}>
-              {nextDepartures.map((departure) => {
+              {nextDepartures.map((departure, index) => {
                 const minutesUntil = minutesUntilDeparture(departure, now);
-                return <View key={`${departure.routeVariantId}-${departure.departureTimeSeconds}`} style={styles.mapStopTimePill}>
+                return <View key={`${departure.routeVariantId}-${departure.departureTimeSeconds}-${index}`} style={styles.mapStopTimePill}>
                   <Text style={styles.mapStopScheduleTime}>{departure.departureTime}</Text>
                   <Text style={styles.mapStopMinutesText}>{minutesUntil === 0 ? "зараз" : `через ${minutesUntil} хв`}</Text>
                 </View>;
@@ -3005,7 +2769,7 @@ function RouteMapScreen({ mapScreen, onBack }: { mapScreen: MapScreen; onBack: (
           {departures !== null && nextDepartures.length === 0 && !departureError ? <Text style={styles.mapStopEmpty}>Сьогодні в цьому напрямку планових рейсів більше немає.</Text> : null}
           {departureError ? <Text style={styles.mapStopError}>Плановий час зараз недоступний. Спробуйте ще раз.</Text> : null}
           <Text style={styles.mapStopFootnote}>
-            Час із затвердженого розкладу{vehiclePositions?.available ? "; живі автобуси позначено на карті." : "."}
+            Час із затвердженого розкладу{liveState === "live" ? "; живі автобуси позначено на карті." : "."}
           </Text>
         </View> : null}
       </View>
@@ -3057,13 +2821,13 @@ function ScheduleDetails({
   onChangeDate: (date: string) => void;
 }) {
   const swipeBack = useSwipeBack(onBack);
-  const readableDate = new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long" })
+  const readableDate = new Intl.DateTimeFormat(getLocale(), { day: "numeric", month: "long" })
     .format(new Date(`${schedule.date}T12:00:00`));
   return (
     <SafeAreaView {...swipeBack} style={styles.transportDetailScreen}>
       <StatusBar style="dark" />
-      <CivicHeader />
-      <BackLink label={`До зупинок маршруту ${schedule.route.routeNumber}`} onPress={onBack} />
+      <View style={styles.insetContent}>
+      <InnerHeader title="Розклад зупинки" onBack={onBack} />
       <Text style={styles.scheduleTitle}>{stopDisplayName(schedule.stop.name)}</Text>
       {stopDisplayCode(schedule.stop.name) ? <Text style={styles.stopDetailsCode}>Зупинка №{stopDisplayCode(schedule.stop.name)}</Text> : null}
       <View style={styles.dateControls}>
@@ -3089,15 +2853,13 @@ function ScheduleDetails({
           <Text style={styles.empty}>На цю дату планових рейсів немає або розклад ще не імпортовано.</Text>
         )}
       </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 function localDate() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
+  return cityDate();
 }
 
 function addDays(date: string, amount: number) {
@@ -3109,21 +2871,21 @@ function addDays(date: string, amount: number) {
 }
 
 function findUpcomingDepartures(departures: TransportDeparture[], now: Date) {
-  const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const currentSeconds = citySeconds(now);
   return departures.filter((departure) => departure.departureTimeSeconds >= currentSeconds).slice(0, 3);
 }
 
 function minutesUntilDeparture(departure: TransportDeparture, now: Date) {
-  const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const currentSeconds = citySeconds(now);
   return Math.max(0, Math.ceil((departure.departureTimeSeconds - currentSeconds) / 60));
 }
 
 function formatUpdatedAt(value: string) {
-  return new Intl.DateTimeFormat("uk-UA", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat(getLocale(), { timeZone: CITY_TIME_ZONE, dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 }
 
 function formatDateOnly(value: string) {
-  return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat(getLocale(), { day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
 }
 
 type FeedEntry = {
@@ -3139,18 +2901,18 @@ function parseNewsDate(label: string | null): Date | null {
   if (!match) return null;
   const month = UKRAINIAN_MONTHS.indexOf(match[1]);
   if (month < 0) return null;
-  const date = new Date(Number(match[3]), month, Number(match[2]));
-  return date.getMonth() === month && date.getDate() === Number(match[2]) ? date : null;
+  const date = new Date(Date.UTC(Number(match[3]), month, Number(match[2]), 12));
+  return date.getUTCMonth() === month && date.getUTCDate() === Number(match[2]) ? date : null;
 }
 
 function feedDayKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return cityDate(date);
 }
 
 function groupFeedEntriesByDay(items: OfficialNewsItem[], events: AirAlertEvent[]): Array<[string, FeedEntry[]]> {
   const groups = new Map<string, FeedEntry[]>();
   const add = (day: string, entry: FeedEntry) => groups.set(day, [...(groups.get(day) ?? []), entry]);
-  const labelFor = (date: Date) => new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long", year: "numeric" }).format(date);
+  const labelFor = (date: Date) => new Intl.DateTimeFormat(getLocale(), { timeZone: CITY_TIME_ZONE, day: "numeric", month: "long", year: "numeric" }).format(date);
 
   for (const item of items) {
     const date = parseNewsDate(item.publishedLabel);
@@ -3174,7 +2936,7 @@ function groupFeedEntriesByDay(items: OfficialNewsItem[], events: AirAlertEvent[
 }
 
 function formatAlertEventTime(value: string) {
-  return new Intl.DateTimeFormat("uk-UA", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat(getLocale(), { timeZone: CITY_TIME_ZONE, hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function displayValue(value: string | null | undefined, fallback: string) {
@@ -3190,17 +2952,17 @@ function stopDisplayName(name: string): string {
   return name.replace(/\s*\(\d+\)\s*$/, "").trim();
 }
 
-function formatDashboardDate() {
-  return new Intl.DateTimeFormat("uk-UA", { day: "numeric", month: "long" }).format(new Date());
+function formatDashboardDate(now = new Date()) {
+  return new Intl.DateTimeFormat(getLocale(), { timeZone: CITY_TIME_ZONE, day: "numeric", month: "long" }).format(now);
 }
 
-function formatDashboardDay() {
-  const day = new Intl.DateTimeFormat("uk-UA", { weekday: "long" }).format(new Date());
+function formatDashboardDay(now = new Date()) {
+  const day = new Intl.DateTimeFormat(getLocale(), { timeZone: CITY_TIME_ZONE, weekday: "long" }).format(now);
   return day.charAt(0).toUpperCase() + day.slice(1);
 }
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value);
+  return new Intl.NumberFormat(getLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value);
 }
 
 function airQualityLabel(index: number) {
@@ -3222,25 +2984,28 @@ function formatWeatherDay(date: string, index: number) {
   if (index === 1) {
     return "Завтра";
   }
-  return new Intl.DateTimeFormat("uk-UA", { weekday: "short", day: "numeric" }).format(new Date(`${date}T12:00:00`));
+  return new Intl.DateTimeFormat(getLocale(), { weekday: "short", day: "numeric" }).format(new Date(`${date}T12:00:00`));
 }
 
 function formatWeatherHour(value: string) {
-  return new Intl.DateTimeFormat("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }).format(new Date(value));
+  return new Intl.DateTimeFormat(getLocale(), { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" }).format(new Date(value));
 }
 
 function sortRoutesByNumber(routes: TransportRoute[]) {
-  const collator = new Intl.Collator("uk-UA", { numeric: true, sensitivity: "base" });
+  const collator = new Intl.Collator(getLocale(), { numeric: true, sensitivity: "base" });
   return [...routes].sort((left, right) => collator.compare(left.routeNumber, right.routeNumber));
 }
 
-function LoadingScreen() {
+function LoadingScreen({ onBack }: { onBack: () => void }) {
   return (
-    <SafeAreaView style={[styles.screen, styles.centered]}>
+    <SafeAreaView style={styles.screen}>
+      <View style={styles.pageHeader}><InnerHeader title="Громадський транспорт" onBack={onBack} /></View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.centered}>
       <View style={styles.loadingIcon}><Ionicons name="bus-outline" size={28} color={COLORS.navy} /></View>
       <ActivityIndicator size="small" color={COLORS.navy} style={styles.loadingSpinner} />
       <Text style={styles.loadingTitle}>Завантажуємо транспорт</Text>
       <Text style={styles.loadingText}>Отримуємо офіційні маршрути та зупинки.</Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -3255,9 +3020,11 @@ function getRouteTermini(route: TransportRouteDetails) {
   return first && last ? `${first}  ⇄  ${last}` : null;
 }
 
-function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ErrorScreen({ message, onRetry, onBack }: { message: string; onRetry: () => void; onBack: () => void }) {
   return (
-    <SafeAreaView style={[styles.screen, styles.centered]}>
+    <SafeAreaView style={styles.screen}>
+      <View style={styles.pageHeader}><InnerHeader title="Громадський транспорт" onBack={onBack} /></View>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.centered}>
       <View style={styles.errorIcon}><Ionicons name="cloud-offline-outline" size={30} color={COLORS.navy} /></View>
       <Text style={styles.errorTitle}>Дані зараз недоступні</Text>
       <Text style={styles.errorText}>{message}</Text>
@@ -3266,164 +3033,170 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
         <Ionicons name="refresh-outline" size={18} color="#ffffff" />
         <Text style={styles.retryText}>Спробувати ще раз</Text>
       </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const STYLE_DEFINITIONS = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f6f7fb", paddingHorizontal: 16 },
+  screen: { flex: 1, backgroundColor: "#f6f7fb" },
+  pageHeader: { paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
+  insetContent: { flex: 1, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   transportScreen: { flex: 1, backgroundColor: "#f6f7fb" },
-  transportContent: { paddingHorizontal: 20 },
-  transportScrollContent: { flexGrow: 1, paddingBottom: 22 },
-  centered: { alignItems: "center", justifyContent: "center" },
+  transportContent: { paddingHorizontal: PAGE_LAYOUT.gutter },
+  transportScrollContent: { flexGrow: 1, paddingTop: PAGE_LAYOUT.top, paddingBottom: PAGE_LAYOUT.bottom },
+  centered: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: PAGE_LAYOUT.gutter, paddingVertical: PAGE_LAYOUT.section },
   civicHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 58, paddingTop: 4 },
-  brandGroup: { alignItems: "center", flexDirection: "row", gap: 8 },
+  brandGroup: { alignItems: "center", flexDirection: "row", gap: 8, flex: 1, minWidth: 0 },
+  brandCopy: { flex: 1, minWidth: 0 },
   brandMark: { backgroundColor: COLORS.navy, height: 34, width: 34 },
-  brandIntroScreen: { alignItems: "center", backgroundColor: "#f6f7fb", flex: 1, justifyContent: "center", paddingHorizontal: 20 },
-  brandIntroContent: { alignItems: "center", marginTop: -38 },
-  brandIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, letterSpacing: -0.5, marginTop: 19 },
-  brandIntroSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 13, marginTop: 6 },
-  brandIntroFooter: { alignItems: "center", bottom: 42, flexDirection: "row", gap: 8, position: "absolute" },
-  brandIntroFooterText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
+  brandIntroScreen: { backgroundColor: "#f6f7fb", flex: 1 },
+  brandIntroBody: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
+  brandIntroContent: { alignItems: "center", width: "100%" },
+  brandIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 27, letterSpacing: -0.5, marginTop: 19, textAlign: "center" },
+  brandIntroSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 13, marginTop: 6, textAlign: "center" },
+  brandIntroFooter: { alignItems: "center", justifyContent: "center", bottom: 24, left: 20, right: 20, flexDirection: "row", gap: 8, position: "absolute" },
+  brandIntroFooterText: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, textAlign: "center", flexShrink: 1 },
   brandTitleRow: { alignItems: "center", flexDirection: "row", gap: 6 },
-  brandTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, lineHeight: 20 },
-  brandSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 1 },
-  headerDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
-  backLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, marginTop: 5, minHeight: 44, paddingRight: 10 },
-  backLinkText: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 13 },
-  pageIntro: { marginTop: 15 },
+  brandTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, lineHeight: 20 },
+  brandSubtitle: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, marginTop: 1 },
+  headerDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
+  backLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 4, marginTop: PAGE_LAYOUT.fieldGap, minHeight: 44, maxWidth: "100%", paddingRight: PAGE_LAYOUT.fieldGap, paddingVertical: PAGE_LAYOUT.fieldGap },
+  backLinkText: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 13, flexShrink: 1 },
+  pageIntro: { marginTop: PAGE_LAYOUT.section },
   eyebrowRow: { alignItems: "center", flexDirection: "row", gap: 6 },
   eyebrowDot: { backgroundColor: COLORS.gold, borderRadius: 4, height: 7, width: 7 },
   eyebrowDotGreen: { backgroundColor: COLORS.green },
-  eyebrow: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase" },
-  pageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 26, letterSpacing: -0.4, lineHeight: 32, marginTop: 7 },
-  pageDescription: { color: "#43474e", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
+  eyebrow: { color: COLORS.muted, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11, letterSpacing: 0.5, textTransform: "uppercase" },
+  pageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 26, letterSpacing: -0.4, lineHeight: 32 },
+  pageDescription: { color: "#43474e", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 21, marginTop: 6 },
   transportHero: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 18, overflow: "hidden", padding: 15 },
   transportHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   transportHeroIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
   transportHeroBadge: { backgroundColor: COLORS.blueSurface, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 },
-  transportHeroBadgeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.5 },
-  transportHeroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, lineHeight: 24, marginTop: 14 },
-  transportHeroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  transportHeroBadgeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, letterSpacing: 0.5 },
+  transportHeroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 19, lineHeight: 24, marginTop: 14 },
+  transportHeroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 4 },
   transportHeroButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 6, marginTop: 14 },
-  transportHeroButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  transportHeroButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   riverNote: { alignItems: "center", backgroundColor: "#e7eeff", borderRadius: 14, flexDirection: "row", gap: 11, marginTop: 14, padding: 12 },
   riverNoteIcon: { alignItems: "center", backgroundColor: "#d3e4ff", borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
   riverNoteText: { flex: 1 },
-  riverNoteEyebrow: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
-  riverNoteTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
-  riverNoteDescription: { color: "#43474e", fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
+  riverNoteEyebrow: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10 },
+  riverNoteTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 2 },
+  riverNoteDescription: { color: "#43474e", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 3 },
   sectionHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 24 },
-  serviceCategoryFirst: { marginTop: 25 },
-  serviceCategory: { marginTop: 28 },
+  serviceCategoryFirst: { marginTop: PAGE_LAYOUT.section },
+  serviceCategory: { marginTop: PAGE_LAYOUT.section },
   serviceGroupHeading: { marginBottom: 10 },
-  serviceGroupTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17 },
-  serviceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
-  serviceGridCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, justifyContent: "space-between", minHeight: 90, padding: 11, width: "48.4%" },
+  serviceGroupTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 17 },
+  serviceGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: PAGE_LAYOUT.gap, columnGap: "4%" },
+  serviceGridCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, justifyContent: "space-between", minHeight: 90, padding: PAGE_LAYOUT.gap, width: "48%" },
   serviceGridIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 34, justifyContent: "center", width: 34 },
   serviceGridFooter: { alignItems: "flex-end", flexDirection: "row", gap: 4, justifyContent: "space-between", marginTop: 7 },
-  serviceGridTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
+  serviceGridTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, lineHeight: 18 },
+  testScenarioLabel: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17 },
   officialMark: { alignItems: "center", flexDirection: "row", gap: 4 },
-  officialMarkText: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
+  officialMarkText: { color: COLORS.green, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
   serviceRow: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 8, minHeight: 74, padding: 12 },
   serviceRowIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
   serviceRowText: { flex: 1 },
-  serviceRowTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 20 },
-  serviceRowDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  serviceRowTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, lineHeight: 20 },
+  serviceRowDescription: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 3 },
   serviceGoldDot: { backgroundColor: COLORS.gold, borderRadius: 4, height: 7, width: 7 },
-  servicesCount: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
+  servicesCount: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
   openDataRow: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 9, minHeight: 82, padding: 12 },
   hubFooter: { alignItems: "center", gap: 7, marginHorizontal: 14, marginTop: 27, paddingBottom: 20 },
   profileAppCard: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 17, flexDirection: "row", gap: 12, marginTop: 18, overflow: "hidden", padding: 15 },
   profileAppMark: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 14, height: 58, justifyContent: "center", width: 58 },
   profileAppCopy: { flex: 1 },
-  profileAppTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 16 },
-  profileAppText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 4 },
+  profileAppTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16 },
+  profileAppText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 4 },
   profileVersionPill: { alignSelf: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 6, marginTop: 8, paddingHorizontal: 6, paddingVertical: 3 },
-  profileVersionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10 },
-  profileSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 20 },
+  profileVersionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10 },
+  profileSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, marginTop: PAGE_LAYOUT.section },
   profileGroup: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 10, overflow: "hidden" },
-  profileRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 67, paddingHorizontal: 13 },
+  profileRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: PAGE_LAYOUT.gap, minHeight: 67, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   profileRowIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 36, justifyContent: "center", width: 36 },
   profileRowText: { flex: 1 },
-  profileRowTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  profileRowValue: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 2 },
+  profileRowTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 14, lineHeight: 19 },
+  profileRowValue: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 2 },
   profilePrivacyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 10, marginTop: 24, padding: 14 },
-  profilePrivacyText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  profilePrivacyText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   profileNoticeCard: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 10, padding: 14 },
   profileNoticeCopy: { flex: 1 },
-  profileNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
-  profileNoticeText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  profileFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 22, textAlign: "center" },
-  settingsContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  profileNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  profileNoticeText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 4 },
+  profileFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 22, textAlign: "center" },
+  settingsContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   accountIntro: { marginTop: 13 },
-  accountIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
-  accountForm: { marginTop: 22 },
-  accountActionButton: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 10, minHeight: 50, paddingHorizontal: 14 },
-  accountActionText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
-  accountDeleteButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 10, minHeight: 50, paddingHorizontal: 14 },
-  accountDeleteText: { color: COLORS.danger, fontFamily: FONTS.semibold, fontSize: 13 },
-  accountFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 13, textAlign: "center" },
-  settingsPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31, marginTop: 18 },
-  settingsPageDescription: { color: "#485768", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 5 },
+  accountIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 4 },
+  accountForm: { marginTop: PAGE_LAYOUT.section },
+  accountActionButton: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: PAGE_LAYOUT.gap, minHeight: 50, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
+  accountActionText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, flexShrink: 1 },
+  accountDeleteButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: PAGE_LAYOUT.gap, minHeight: 50, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
+  accountDeleteText: { color: COLORS.danger, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, flexShrink: 1 },
+  accountFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 13, textAlign: "center" },
+  settingsPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, lineHeight: 31, marginTop: PAGE_LAYOUT.block },
+  settingsPageDescription: { color: "#485768", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 5 },
   legalCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 14, padding: 14 },
   legalCardHeading: { alignItems: "center", flexDirection: "row", gap: 8 },
-  legalCardTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15 },
-  legalCardText: { color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 10 },
-  pollQuestion: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 18, lineHeight: 25, marginTop: 18 },
-  pollOption: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 66, paddingHorizontal: 15 },
+  legalCardTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  legalCardText: { color: COLORS.ink, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 10 },
+  pollQuestion: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 18, lineHeight: 25, marginTop: 18 },
+  pollOption: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: PAGE_LAYOUT.gap, minHeight: 66, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   settingsHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
   settingsHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
-  settingsHeroKicker: { color: "#f4c65b", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.7, marginTop: 16 },
-  settingsHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 5 },
-  settingsHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  settingsHeroKicker: { color: "#f4c65b", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, letterSpacing: 0.7, marginTop: 16 },
+  settingsHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24, marginTop: 5 },
+  settingsHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 20, marginTop: 7 },
   settingsCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 16, borderWidth: 1, marginTop: 13, overflow: "hidden" },
-  settingsChoice: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 74, paddingHorizontal: 13 },
+  settingsChoice: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: PAGE_LAYOUT.gap, minHeight: 74, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   settingsChoiceActive: { backgroundColor: COLORS.blueSurface },
   settingsChoiceIcon: { alignItems: "center", borderRadius: 10, height: 32, justifyContent: "center", width: 32 },
   settingsChoiceCopy: { flex: 1 },
-  settingsChoiceTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  settingsChoiceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  settingsChoiceTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 14, lineHeight: 19 },
+  settingsChoiceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 3 },
   settingsInfoNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 13, padding: 13 },
-  settingsInfoText: { color: "#40546b", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  settingsInfoText: { color: "#40546b", flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   settingsSafetyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 9, marginTop: 14, padding: 11 },
-  settingsSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  settingsSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   settingsSwitch: { backgroundColor: COLORS.blueSoft, borderColor: COLORS.controlBorder, borderRadius: 15, borderWidth: 1, height: 28, padding: 2, width: 48 },
   settingsSwitchOn: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
   settingsSwitchKnob: { backgroundColor: "#ffffff", borderRadius: 11, height: 22, width: 22 },
   settingsSwitchKnobOn: { alignSelf: "flex-end" },
-  settingsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginHorizontal: 4, marginTop: 16 },
-  cnapContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  settingsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginHorizontal: 4, marginTop: 16 },
+  cnapContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   cnapHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
   cnapHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   cnapHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
   cnapDemoBadge: { backgroundColor: "rgba(247,190,61,0.15)", borderColor: "rgba(247,190,61,0.38)", borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 5 },
-  cnapDemoBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.6 },
-  cnapHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 17 },
-  cnapHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  cnapDemoBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.6 },
+  cnapHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24, marginTop: 17 },
+  cnapHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 20, marginTop: 7 },
   cnapSafetyNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
-  cnapSafetyNoteText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
-  cnapFormCard: { marginTop: 18 },
-  cnapFormTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17, marginBottom: 4 },
-  cnapFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 12, marginTop: 16 },
-  cnapSelect: { alignItems: "center", backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 6, minHeight: 52, paddingHorizontal: 16 },
-  cnapSelectText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13, paddingRight: 8 },
+  cnapSafetyNoteText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
+  cnapFormCard: { marginTop: PAGE_LAYOUT.section },
+  cnapFormTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 17, marginBottom: 4 },
+  cnapFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginTop: 16 },
+  cnapSelect: { alignItems: "center", backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: PAGE_LAYOUT.fieldGap, minHeight: 52, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
+  cnapSelectText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, paddingRight: 8 },
   cnapOptions: { borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, marginTop: 6, overflow: "hidden" },
-  cnapOption: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 45, paddingHorizontal: 12 },
+  cnapOption: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 48, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   cnapOptionActive: { backgroundColor: COLORS.navy },
-  cnapOptionText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 12, paddingRight: 8 },
-  cnapOptionTextActive: { color: "#ffffff", fontFamily: FONTS.medium },
-  cnapInput: { backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 13, marginTop: 6, minHeight: 52, paddingHorizontal: 16, paddingVertical: 11 },
+  cnapOptionText: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, paddingRight: 8 },
+  cnapOptionTextActive: { color: "#ffffff", fontFamily: FONTS.medium, fontWeight: "500" },
+  cnapInput: { backgroundColor: "#f8faff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 6, minHeight: 52, paddingHorizontal: 16, paddingVertical: 11 },
   cnapTextarea: { minHeight: 96, paddingTop: 11 },
-  cnapSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 18, minHeight: 49, paddingHorizontal: 14 },
-  cnapSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
-  cnapFormFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 11 },
+  cnapSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: PAGE_LAYOUT.section, minHeight: 50, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
+  cnapSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, flexShrink: 1, textAlign: "center" },
+  cnapFormFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 11 },
   cnapOfficialLink: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 13, padding: 13 },
   cnapOfficialLinkCopy: { flex: 1 },
-  cnapOfficialLinkTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13 },
-  cnapOfficialLinkText: { color: COLORS.navy, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
+  cnapOfficialLinkTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  cnapOfficialLinkText: { color: COLORS.navy, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 3 },
   newsSourceLine: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, marginTop: 16, paddingVertical: 5 },
-  newsSourceLineText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  newsSourceLineText: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
   feedAlertCard: { alignItems: "flex-start", borderRadius: 14, flexDirection: "row", gap: 10, marginTop: 12, padding: 13 },
   feedAlertCardClear: { backgroundColor: "#eef8eb", borderColor: "#d7ead0", borderWidth: 1 },
   feedAlertCardActive: { backgroundColor: "#fff4f3", borderColor: "#f0b5b0", borderWidth: 1 },
@@ -3431,101 +3204,93 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   feedAlertIconClear: { backgroundColor: "#dff1da" },
   feedAlertIconActive: { backgroundColor: "#ffe3e0" },
   feedAlertCopy: { flex: 1 },
-  feedAlertKicker: { color: COLORS.green, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.45 },
+  feedAlertKicker: { color: COLORS.green, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.45 },
   feedAlertKickerActive: { color: "#a31d1d" },
-  feedAlertTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  feedAlertTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 3 },
   feedAlertTitleActive: { color: "#8e1b1b" },
-  feedAlertText: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  feedAlertText: { color: "#3f6649", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 3 },
   feedAlertTextActive: { color: "#a54943" },
-  feedAlertTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 5 },
-  feedAlertStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 10, lineHeight: 15, marginTop: 5 },
+  feedAlertTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, marginTop: 5 },
+  feedAlertStale: { color: "#795000", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, lineHeight: 15, marginTop: 5 },
   alertEventCard: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 9, minHeight: 66, paddingVertical: 11 },
   alertEventCardActive: {},
   alertEventCardClear: {},
   alertEventIcon: { alignItems: "center", height: 28, justifyContent: "center", width: 28 },
   alertEventCopy: { flex: 1 },
-  alertEventTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 13 },
-  alertEventText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 2 },
-  alertEventTime: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 11 },
+  alertEventTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  alertEventText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 2 },
+  alertEventTime: { color: COLORS.muted, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11 },
   newsListHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
-  newsListHeadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19 },
-  newsListHeadingMeta: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11 },
+  newsListHeadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 19 },
+  newsListHeadingMeta: { color: COLORS.green, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
   newsDayGroup: { marginTop: 14 },
-  newsDayHeading: { color: COLORS.muted, fontFamily: FONTS.semibold, fontSize: 12, marginBottom: 1, textTransform: "uppercase" },
+  newsDayHeading: { color: COLORS.muted, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12, marginBottom: 1, textTransform: "uppercase" },
   newsArticleCard: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 76, paddingVertical: 12 },
   newsArticleCopy: { flex: 1 },
   newsArticleTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   newsArticleIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
-  newsArticleDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 5 },
-  newsArticleTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15, lineHeight: 20 },
+  newsArticleDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 5 },
+  newsArticleTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, lineHeight: 20 },
   newsArticleAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 6, marginTop: 12 },
-  newsArticleActionText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  newsArticleActionText: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
   newsMoreLink: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: 6, marginTop: 18, paddingVertical: 7 },
-  newsMoreLinkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  newsReaderContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
-  newsReaderKicker: { alignItems: "center", alignSelf: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 8, flexDirection: "row", gap: 6, marginTop: 16, paddingHorizontal: 8, paddingVertical: 6 },
-  newsReaderKickerText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.45 },
-  newsReaderTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 33, marginTop: 20 },
-  newsReaderDate: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 7 },
-  newsReaderPreview: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, marginTop: 19, padding: 15 },
-  newsReaderPreviewLabel: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.65 },
-  newsReaderPreviewText: { color: COLORS.ink, fontFamily: FONTS.regular, fontSize: 15, lineHeight: 24, marginTop: 22 },
-  newsReaderAttribution: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 13, padding: 13 },
-  newsReaderAttributionText: { color: COLORS.muted, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 18 },
-  newsReaderOriginalButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 14, minHeight: 49, paddingHorizontal: 14 },
-  newsReaderOriginalButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  newsMoreLinkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   transportPageTitleRow: { alignItems: "flex-start", flexDirection: "row", gap: 10, justifyContent: "space-between", marginTop: 4 },
   transportPageTitleCopy: { flex: 1 },
-  transportPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 22, lineHeight: 28 },
-  transportPageDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3, maxWidth: 235 },
+  transportPageTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 22, lineHeight: 28 },
+  transportPageDescription: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 3, maxWidth: 235 },
   transportPlanMark: { alignItems: "center", flexDirection: "row", gap: 4, marginTop: 4 },
   transportPlanMarkAvailable: {},
-  transportPlanMarkText: { color: "#795000", fontFamily: FONTS.medium, fontSize: 10 },
+  transportPlanMarkText: { color: "#795000", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10 },
   transportPlanMarkTextAvailable: { color: COLORS.green },
   transportSourceLine: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 10, flexDirection: "row", gap: 8, marginTop: 15, padding: 11 },
   transportSourceCopy: { flex: 1 },
-  transportSourceTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 12 },
-  transportSourceText: { color: "#485768", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 3 },
-  transportUpdatedAt: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 6 },
+  transportSourceTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
+  transportSourceText: { color: "#485768", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 3 },
+  transportUpdatedAt: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 6 },
   dataSourcesInlineLink: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, marginTop: 8 },
-  dataSourcesInlineLinkText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
+  dataSourcesInlineLinkText: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
   transportDataMeta: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, marginTop: 9 },
-  transportDataMetaText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11 },
+  transportDataMetaText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11 },
   searchBox: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 14, minHeight: 48, paddingHorizontal: 12 },
   title: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 20 },
-  hubContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20 },
+  hubContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   homeContent: { flexGrow: 1, paddingBottom: 28 },
-  dashboardContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
-  dashboardTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 18 },
-  dashboardDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
-  dashboardDay: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, letterSpacing: -0.5, lineHeight: 31 },
+  dashboardContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
+  dashboardTop: { alignItems: "center", flexDirection: "row", gap: PAGE_LAYOUT.gap, justifyContent: "space-between", marginTop: PAGE_LAYOUT.block },
+  dashboardDateCopy: { flex: 1, minWidth: 0 },
+  dashboardDate: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
+  dashboardDay: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, letterSpacing: -0.5, lineHeight: 31 },
   dashboardCityChip: { alignItems: "center", backgroundColor: "transparent", flexDirection: "row", gap: 4, paddingHorizontal: 2, paddingVertical: 7 },
-  dashboardCityText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
+  dashboardCityText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   dashboardStatusGrid: { flexDirection: "row", gap: 10, marginTop: 17 },
   dashboardStatusCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, flex: 1, minHeight: 118, padding: 14 },
   dashboardTransportCard: { backgroundColor: COLORS.blueSurface, borderColor: "#d3e4ff" },
-  dashboardStatusTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 14 },
-  dashboardStatusText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  dashboardStatusTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 14 },
+  dashboardStatusText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 4 },
   weatherPreviewIcon: { height: 34, marginLeft: -6, marginTop: -5, width: 34 },
   cityWeatherIcon: { height: 30, width: 30 },
-  weatherPreviewTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 27, marginTop: 2 },
+  weatherPreviewTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 27, marginTop: 2 },
   weatherFeatureCard: { alignItems: "stretch", backgroundColor: "#eaf2ff", borderColor: "#d4e3f7", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 15, minHeight: 100, overflow: "hidden", padding: 9 },
   weatherFeatureInfo: { flex: 1, flexDirection: "row", minWidth: 0 },
-  weatherFeatureMain: { flex: 1, justifyContent: "center" },
-  weatherFeatureLabel: { color: "#526d89", fontFamily: FONTS.medium, fontSize: 11 },
-  weatherFeatureTemperatureRow: { alignItems: "center", flexDirection: "row", gap: 4, marginTop: -2 },
-  weatherFeatureTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 35, letterSpacing: -1.5, lineHeight: 40 },
+  weatherFeatureMain: { width: 104, flexShrink: 1, justifyContent: "center", minWidth: 0 },
+  weatherFeatureLabel: { color: "#526d89", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
+  weatherFeatureTemperatureRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  weatherFeatureTemperature: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 35, letterSpacing: -1.5, lineHeight: 40 },
+  weatherFeatureTemperatureCompact: { fontSize: 27, lineHeight: 34 },
   weatherFeatureIcon: { height: 42, width: 42 },
-  weatherFeatureCondition: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12, marginTop: -3 },
-  weatherFeatureAir: { alignItems: "flex-start", borderLeftColor: "#c5d7ec", borderLeftWidth: 1, justifyContent: "center", marginLeft: 4, paddingLeft: 8, width: 88 },
-  weatherFeatureAirLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 3 },
-  weatherFeatureAirValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
-  weatherFeatureAirMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11, marginTop: 2 },
-  weatherFeatureAlert: { alignItems: "center", borderRadius: 9, gap: 5, justifyContent: "center", minHeight: 80, paddingHorizontal: 6, width: 80 },
+  weatherFeatureIconCompact: { height: 26, width: 26 },
+  weatherFeatureCondition: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginTop: 4 },
+  weatherFeatureAir: { alignItems: "flex-start", justifyContent: "center", marginLeft: 8, paddingLeft: 0, width: 88 },
+  weatherFeatureAirLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 3 },
+  weatherFeatureAirValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 2 },
+  weatherFeatureAirMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 2 },
+  weatherFeatureAlert: { alignItems: "center", borderRadius: 9, gap: 5, justifyContent: "center", minHeight: 80, paddingHorizontal: 6, width: 80, marginLeft: 4 },
+  weatherFeatureAlertCompact: { width: 64 },
   weatherFeatureAlertClear: { backgroundColor: "#dff1da" },
   weatherFeatureAlertUnknown: { backgroundColor: COLORS.blueSurface },
   weatherFeatureAlertActive: { backgroundColor: "#ffe3e0" },
-  weatherFeatureAlertText: { color: "#245b31", fontFamily: FONTS.medium, fontSize: 11, lineHeight: 14, textAlign: "center" },
+  weatherFeatureAlertText: { color: "#245b31", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, lineHeight: 14, textAlign: "center" },
   weatherFeatureAlertTextActive: { color: "#8e1b1b" },
   weatherFeatureChevron: { position: "absolute", right: 5, top: 5 },
   airAlertBanner: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 8, marginTop: 9, minHeight: 46, paddingHorizontal: 10, paddingVertical: 7 },
@@ -3535,130 +3300,131 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   airAlertIconClear: { backgroundColor: "#dff1da" },
   airAlertIconActive: { backgroundColor: "#ffe3e0" },
   airAlertCopy: { flex: 1 },
-  airAlertTitle: { color: COLORS.green, fontFamily: FONTS.semibold, fontSize: 12 },
+  airAlertTitle: { color: COLORS.green, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   airAlertTitleActive: { color: "#8e1b1b" },
-  airAlertTextClear: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 10, marginTop: 1 },
+  airAlertTextClear: { color: "#3f6649", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 1 },
   airAlertTextActive: { color: "#a54943" },
   defendersBanner: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 10, minHeight: 56, paddingHorizontal: 12, paddingVertical: 9 },
   defendersBannerGlow: {},
   defendersBannerIcon: { alignItems: "center", backgroundColor: "#fff3ce", borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
   defendersBannerCopy: { flex: 1 },
-  defendersBannerKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.7 },
-  defendersBannerTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
-  defendersBannerText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  defendersBannerKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.7 },
+  defendersBannerTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, lineHeight: 19 },
+  defendersBannerText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 15, marginTop: 2 },
   defendersBannerAction: {},
-  defendersContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  defendersContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   defendersHero: { backgroundColor: "#173f37", borderRadius: 19, marginTop: 15, overflow: "hidden", padding: 19 },
   defendersHeroMark: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.09)", borderColor: "rgba(247,190,61,0.35)", borderRadius: 15, borderWidth: 1, height: 52, justifyContent: "center", width: 52 },
-  defendersHeroKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.9, marginTop: 18 },
-  defendersHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31, marginTop: 5 },
-  defendersHeroText: { color: "#d9ece6", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 8 },
+  defendersHeroKicker: { color: "#f7be3d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, letterSpacing: 0.9, marginTop: 18 },
+  defendersHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, lineHeight: 31, marginTop: 5 },
+  defendersHeroText: { color: "#d9ece6", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 20, marginTop: 8 },
   defendersIntro: { marginTop: 18 },
-  defendersIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, lineHeight: 31 },
-  defendersIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  defendersIntroTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, lineHeight: 31 },
+  defendersIntroText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
   featuredDonationCard: { backgroundColor: "#123a63", borderColor: "#285375", borderRadius: 15, borderWidth: 1, marginTop: 13, padding: 14 },
   featuredDonationTop: { alignItems: "center", flexDirection: "row", gap: 10 },
   featuredDonationIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
   featuredDonationCopy: { flex: 1 },
-  featuredDonationLabel: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.7 },
-  featuredDonationTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 16, marginTop: 3 },
-  featuredDonationText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 12 },
+  featuredDonationLabel: { color: "#f7be3d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.7 },
+  featuredDonationTitle: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, marginTop: 3 },
+  featuredDonationText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 12 },
   featuredDonationButton: { alignItems: "center", backgroundColor: "#f7be3d", borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 13, minHeight: 44, paddingHorizontal: 13 },
-  featuredDonationButtonText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 13 },
+  featuredDonationButtonText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   defendersTrustCard: { alignItems: "flex-start", backgroundColor: "#eef8eb", borderColor: "#d7ead0", borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 13, padding: 13 },
   defendersTrustIcon: { alignItems: "center", backgroundColor: "#dff1da", borderRadius: 10, height: 39, justifyContent: "center", width: 39 },
   defendersTrustCopy: { flex: 1 },
-  defendersTrustTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontSize: 14 },
-  defendersTrustText: { color: "#3f6649", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 3 },
+  defendersTrustTitle: { color: "#245b31", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  defendersTrustText: { color: "#3f6649", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 3 },
   defendersFundList: { gap: 10, marginTop: 22 },
-  defendersListTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, marginBottom: 1 },
+  defendersListTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 19, marginBottom: 1 },
   defendersFundCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, padding: 14 },
   defendersFundTop: { alignItems: "center", flexDirection: "row", gap: 10 },
   defendersFundIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 41, justifyContent: "center", width: 41 },
   defendersFundCopy: { flex: 1 },
-  defendersFundTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
-  defendersFundVerified: { color: COLORS.green, fontFamily: FONTS.medium, fontSize: 11, marginTop: 3 },
-  defendersFundDescription: { color: "#526170", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 12 },
-  defendersFundSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  defendersFundTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  defendersFundVerified: { color: COLORS.green, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 3 },
+  defendersFundDescription: { color: "#526170", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  defendersFundSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 8 },
   defendersDonateButton: { alignItems: "center", backgroundColor: "#173f37", borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 13, minHeight: 46, paddingHorizontal: 13 },
-  defendersDonateButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  defendersDonateButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   defendersEmptyCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderStyle: "dashed", borderWidth: 1, marginTop: 22, padding: 20 },
   defendersEmptyIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
-  defendersEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 12 },
-  defendersEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
-  defendersFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 20, textAlign: "center" },
+  defendersEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, marginTop: 12 },
+  defendersEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
+  defendersFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 20, textAlign: "center" },
   currencyWidget: { borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 22, paddingVertical: 12 },
   currencyWidgetHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   currencyWidgetTitleRow: { alignItems: "center", flexDirection: "row", gap: 7 },
-  currencyWidgetTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
-  currencyWidgetSource: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  currencyWidgetTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  currencyWidgetSource: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
   currencyRatesRow: { flexDirection: "row", gap: 9, marginTop: 13 },
   currencyRate: { borderLeftColor: COLORS.border, borderLeftWidth: 1, flex: 1, paddingHorizontal: 9, paddingVertical: 4 },
-  currencyCode: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
-  currencyValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
-  currencyMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 1 },
-  currencyUnavailable: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 13 },
-  currencyStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 10, marginTop: 8 },
+  currencyCode: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11 },
+  currencyValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 3 },
+  currencyMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 1 },
+  currencyUnavailable: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 13 },
+  currencyStale: { color: "#795000", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 8 },
   currencyExpand: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 4, marginTop: 10, minHeight: 30 },
-  currencyExpandText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
-  weatherContent: { paddingBottom: 32, paddingHorizontal: 20 },
+  currencyExpandText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
+  weatherContent: { paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   weatherHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 16, padding: 16 },
   weatherHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  weatherHeroTemperature: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 52, letterSpacing: -2 },
-  weatherHeroCondition: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 14, marginTop: 2 },
+  weatherHeroTemperature: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 52, letterSpacing: -2 },
+  weatherHeroCondition: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, marginTop: 2 },
   weatherHeroIcon: { height: 78, width: 78 },
   weatherMetrics: { borderTopColor: "rgba(255,255,255,0.18)", borderTopWidth: 1, flexDirection: "row", gap: 8, marginTop: 16, paddingTop: 13 },
   weatherMetric: { flex: 1 },
-  weatherMetricLabel: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 10, marginTop: 5 },
-  weatherMetricValue: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 12, marginTop: 2 },
+  weatherMetricLabel: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 5 },
+  weatherMetricValue: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12, marginTop: 2 },
   weatherAirQualityCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", marginTop: 12, padding: 13 },
   weatherAirQualityIcon: { alignItems: "center", backgroundColor: "#eef7eb", borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
   weatherAirQualityCopy: { flex: 1, marginLeft: 10 },
-  weatherAirQualityLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
-  weatherAirQualityValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
-  weatherAirQualityMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, lineHeight: 15, textAlign: "right" },
+  weatherAirQualityLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
+  weatherAirQualityValue: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 3 },
+  weatherAirQualityMeta: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, lineHeight: 15, textAlign: "right" },
   weatherDayTabs: { gap: 5, paddingTop: 18 },
   weatherDayTab: { backgroundColor: COLORS.blueSurface, borderRadius: 9, minWidth: 96, paddingHorizontal: 11, paddingVertical: 8 },
   weatherDayTabActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
-  weatherDayTabText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 12 },
+  weatherDayTabText: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   weatherDayTabTextActive: { color: "#ffffff" },
-  weatherDayTabTemperature: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 4 },
+  weatherDayTabTemperature: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: 4 },
   weatherDaySummary: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 14, padding: 14 },
-  weatherDaySummaryTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
-  weatherDaySummaryText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 4 },
+  weatherDaySummaryTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  weatherDaySummaryText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 4 },
   weatherSunTimes: { gap: 4 },
-  weatherSunTime: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12 },
-  weatherSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 22 },
+  weatherSunTime: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
+  weatherSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, marginTop: 22 },
   weatherHours: { borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, gap: 0, marginTop: 10, paddingVertical: 10 },
   weatherHourCard: { alignItems: "center", minWidth: 64, paddingHorizontal: 6, paddingVertical: 4 },
-  weatherHourTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
+  weatherHourTime: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10 },
   weatherHourIcon: { height: 32, marginVertical: 4, width: 32 },
-  weatherHourTemperature: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
-  weatherHourRain: { color: COLORS.navy, fontFamily: FONTS.regular, fontSize: 10, marginTop: 3 },
-  weatherSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 22, textAlign: "center" },
-  weatherStale: { color: "#795000", fontFamily: FONTS.regular, fontSize: 11, marginTop: 5, textAlign: "center" },
+  weatherHourTemperature: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  weatherHourRain: { color: COLORS.navy, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 3 },
+  weatherSource: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 22, textAlign: "center" },
+  weatherStale: { color: "#795000", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: 5, textAlign: "center" },
   dashboardSectionRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 27, paddingBottom: 9 },
-  dashboardSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17 },
-  dashboardAllLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  dashboardSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 17 },
+  dashboardAllLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  smallAction: { minWidth: 44, minHeight: 44, justifyContent: "center", alignItems: "center" },
   dashboardFeedCard: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 9, padding: 13 },
   dashboardFeedIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
   dashboardFeedCopy: { flex: 1 },
-  dashboardFeedTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
-  dashboardFeedText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  dashboardFeedTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  dashboardFeedText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 3 },
   homeNewsList: { marginTop: 4 },
   homeNewsItem: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingVertical: 12 },
   homeNewsIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, height: 32, justifyContent: "center", width: 32 },
   homeNewsCopy: { flex: 1 },
-  homeNewsTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
-  homeNewsMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
+  homeNewsTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, lineHeight: 19 },
+  homeNewsMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 3 },
   homeNewsAllButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
-  homeNewsAllText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
+  homeNewsAllText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   dashboardServicesRow: { gap: 10, paddingTop: 10, paddingRight: 4 },
-  dashboardServicesGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 10 },
-  dashboardServiceCard: { alignItems: "center", borderColor: COLORS.border, borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 60, paddingHorizontal: 10, paddingVertical: 9, width: "48.7%" },
+  dashboardServicesGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: PAGE_LAYOUT.gap, columnGap: "4%", paddingTop: PAGE_LAYOUT.fieldGap },
+  dashboardServiceCard: { alignItems: "center", borderColor: COLORS.border, borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 60, paddingHorizontal: 12, paddingVertical: 12, width: "48%" },
   dashboardServiceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 7, height: 33, justifyContent: "center", width: 33 },
-  dashboardServiceTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontSize: 11, lineHeight: 15 },
-  simpleTabContent: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 20, paddingTop: 0 },
+  dashboardServiceTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, lineHeight: 15 },
+  simpleTabContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   cityKicker: { color: "#43474e", fontSize: 12, fontWeight: "700", letterSpacing: 1.1, marginTop: 20 },
   homeTitle: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 6 },
   homeIntro: { color: "#43474e", fontSize: 16, lineHeight: 23, marginTop: 8 },
@@ -3682,14 +3448,14 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   homeRowTitle: { color: "#071d31", fontSize: 16, fontWeight: "700" },
   homeRowDescription: { color: "#43474e", fontSize: 13, marginTop: 4 },
   homeChevron: { color: "#5b6e80", fontSize: 28 },
-  bottomNavigation: { backgroundColor: "rgba(255,255,255,0.97)", borderTopColor: COLORS.border, borderTopWidth: 1, flexDirection: "row", marginHorizontal: -16, paddingHorizontal: 6, paddingVertical: 9 },
-  tabButton: { alignItems: "center", flex: 1, minHeight: 44 },
+  bottomNavigation: { backgroundColor: "rgba(255,255,255,0.97)", borderTopColor: COLORS.border, borderTopWidth: 1, flexDirection: "row", paddingHorizontal: 8, paddingVertical: 8 },
+  tabButton: { alignItems: "center", justifyContent: "center", flex: 1, minHeight: 48, paddingHorizontal: 4, paddingVertical: 4 },
   tabIcon: { color: COLORS.muted, fontSize: 21, lineHeight: 23 },
-  tabLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, marginTop: 4 },
-  tabActive: { color: COLORS.navy, fontFamily: FONTS.semibold },
+  tabLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, marginTop: 4 },
+  tabActive: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600" },
   hubSubtitle: { color: "#123a63", fontSize: 18, fontWeight: "700", marginTop: 8 },
   hubIntro: { color: "#43474e", fontSize: 16, lineHeight: 23, marginTop: 8 },
-  sectionLabel: { color: "#4b5563", fontFamily: FONTS.semibold, fontSize: 11, letterSpacing: 0.7, marginTop: 0, textTransform: "uppercase" },
+  sectionLabel: { color: "#4b5563", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11, letterSpacing: 0.7, marginTop: 0, textTransform: "uppercase" },
   serviceCard: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 14, marginTop: 12, padding: 16 },
   transportServiceCard: { backgroundColor: "#eef4ff", borderColor: "#d3e4ff", marginTop: 24 },
   serviceIcon: { alignItems: "center", backgroundColor: "#eef4ff", borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
@@ -3698,172 +3464,172 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   serviceTitle: { color: "#071d31", fontSize: 17, fontWeight: "700" },
   serviceDescription: { color: "#43474e", fontSize: 14, lineHeight: 20, marginTop: 4 },
   serviceAction: { color: "#123a63", fontSize: 14, fontWeight: "700", marginTop: 10 },
-  hubFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
+  hubFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 17, textAlign: "center" },
   detailIntro: { marginTop: 13 },
-  serviceDetailsContent: { alignItems: "stretch", paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
-  serviceDetailsIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 16, height: 58, justifyContent: "center", width: 58 },
-  serviceDetailsIconText: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 30 },
-  detailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, letterSpacing: -0.3, lineHeight: 31, marginTop: 7 },
-  detailDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
-  serviceDetailsTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, letterSpacing: -0.3, marginTop: 15 },
-  serviceDetailsDescription: { color: "#596574", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
+  serviceDetailsContent: { alignItems: "stretch", paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
+  serviceDetailsIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 16, height: 58, justifyContent: "center", width: 58, marginTop: PAGE_LAYOUT.block },
+  serviceDetailsIconText: { color: COLORS.navy, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 30 },
+  detailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, letterSpacing: -0.3, lineHeight: 31, marginTop: 7 },
+  detailDescription: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 21, marginTop: 6 },
+  serviceDetailsTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, letterSpacing: -0.3, marginTop: 15 },
+  serviceDetailsDescription: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 21, marginTop: 6 },
   serviceNotice: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderLeftColor: COLORS.gold, borderLeftWidth: 3, borderRadius: 14, borderWidth: 1, marginTop: 20, padding: 14 },
-  serviceNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15 },
-  serviceNoticeText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  serviceNoticeTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  serviceNoticeText: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
   serviceComingSoon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 16, padding: 13 },
-  serviceComingSoonText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  serviceComingSoonText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   externalButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, marginTop: 16, minHeight: 50, padding: 15 },
-  externalButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 14 },
-  externalHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 12, textAlign: "center" },
+  externalButtonText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  externalHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 12, textAlign: "center" },
   silencePanel: { alignItems: "center", backgroundColor: COLORS.navyDark, borderRadius: 16, marginTop: 20, padding: 22 },
-  silenceTime: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 40 },
-  silenceTitle: { color: "#eef4ff", fontFamily: FONTS.semibold, fontSize: 14, marginTop: 8, textAlign: "center" },
-  silenceCountdown: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 12, marginTop: 8, textAlign: "center" },
-  silenceContent: { paddingBottom: 32, paddingHorizontal: 20 },
+  silenceTime: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 40 },
+  silenceTitle: { color: "#eef4ff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 8, textAlign: "center" },
+  silenceCountdown: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 8, textAlign: "center" },
+  silenceContent: { paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   silenceHero: { alignItems: "center", backgroundColor: COLORS.navyDark, borderRadius: 18, marginTop: 20, overflow: "hidden", padding: 24 },
   silenceHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
-  silenceHeroKicker: { color: "#d3e4ff", fontFamily: FONTS.semibold, fontSize: 11, letterSpacing: 1, marginTop: 14 },
-  silenceHeroTime: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 45, letterSpacing: -1, marginTop: 4 },
-  silenceHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, marginTop: 4, textAlign: "center" },
+  silenceHeroKicker: { color: "#d3e4ff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11, letterSpacing: 1, marginTop: 14 },
+  silenceHeroTime: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 45, letterSpacing: -1, marginTop: 4 },
+  silenceHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 4, textAlign: "center" },
   remembranceCard: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 14, padding: 14 },
   remembranceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
   remembranceCopy: { flex: 1 },
-  remembranceTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
-  remembranceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  accessibilityTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 18 },
-  accessibilityIntro: { color: "#596574", fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, marginTop: 6 },
+  remembranceTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  remembranceText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 4 },
+  accessibilityTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, marginTop: 18 },
+  accessibilityIntro: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 21, marginTop: 6 },
   inlineLoader: { marginTop: 12 },
   inlineError: { backgroundColor: "#fff5f4", borderColor: "#f4ceca", borderRadius: 12, borderWidth: 1, marginTop: 12, padding: 14 },
-  inlineErrorText: { color: "#991b1b", fontFamily: FONTS.regular, fontSize: 13 },
-  inlineRetry: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13, marginTop: 8 },
+  inlineErrorText: { color: "#991b1b", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13 },
+  inlineRetry: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, paddingVertical: 12, minHeight: 44 },
   accessibilityList: { gap: 12, paddingBottom: 30, paddingHorizontal: 20, paddingTop: 16 },
-  accessibilityCount: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginBottom: 2 },
-  staleData: { color: "#795000", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginBottom: 4 },
+  accessibilityCount: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginBottom: 2 },
+  staleData: { color: "#795000", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginBottom: 4 },
   accessibilityCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
-  accessibilityBuildingName: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
-  accessibilityAddress: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
-  accessibilityDate: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 12, marginTop: 9 },
+  accessibilityBuildingName: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  accessibilityAddress: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
+  accessibilityDate: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginTop: 9 },
   accessibilityFooter: { marginTop: 8 },
-  accessibilityNote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, textAlign: "center" },
+  accessibilityNote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, textAlign: "center" },
   miniaturesList: { gap: 10, paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
   miniaturesMapCard: { borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, height: 220, overflow: "hidden" },
   miniaturesCountRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 12 },
   miniaturesCountPill: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 14, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 6 },
-  miniaturesCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
-  miniaturesSourceDate: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10 },
+  miniaturesCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11 },
+  miniaturesSourceDate: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10 },
   miniaturesNotice: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
-  miniaturesNoticeText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16 },
-  miniaturesListTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16, marginTop: 9 },
+  miniaturesNoticeText: { color: "#3f5269", flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16 },
+  miniaturesListTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16, marginTop: 9 },
   miniatureCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
   miniatureCardTop: { alignItems: "center", flexDirection: "row", gap: 10 },
   miniatureNumber: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, height: 35, justifyContent: "center", width: 35 },
-  miniatureNumberText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  miniatureNumberText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   miniatureCardCopy: { flex: 1 },
-  miniatureTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
-  miniatureAddress: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
-  miniatureSummary: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 11 },
+  miniatureTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  miniatureAddress: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 3 },
+  miniatureSummary: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 11 },
   miniatureMeta: { flexDirection: "row", flexWrap: "wrap", marginTop: 9 },
-  miniatureMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10 },
+  miniatureMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10 },
   miniatureMapAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, marginTop: 12 },
-  miniatureMapActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
-  miniaturesFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, marginHorizontal: 14, marginTop: 10, textAlign: "center" },
+  miniatureMapActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
+  miniaturesFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 17, marginHorizontal: 14, marginTop: 10, textAlign: "center" },
   sourceButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 14, minHeight: 46 },
-  sourceButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  paymentContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  sourceButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  paymentContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   paymentHero: { backgroundColor: COLORS.navy, borderRadius: 18, marginTop: 15, padding: 18 },
   paymentHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   paymentHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 12, height: 48, justifyContent: "center", width: 48 },
-  paymentHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 24, marginTop: 17 },
-  paymentHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginTop: 7 },
+  paymentHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24, marginTop: 17 },
+  paymentHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 20, marginTop: 7 },
   paymentSafetyNote: { alignItems: "flex-start", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 12, padding: 12 },
-  paymentSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  paymentSafetyText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   paymentCard: { marginTop: 20 },
-  paymentSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 9 },
+  paymentSectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, marginBottom: 9 },
   paymentTicketChoice: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 22, padding: 12 },
   paymentReferenceBlock: { marginBottom: 22, marginTop: 14 },
-  paymentReferenceHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 7 },
+  paymentReferenceHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 7 },
   paymentTicketIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
   paymentTicketCopy: { flex: 1 },
-  paymentTicketTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14 },
-  paymentTicketText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
-  paymentTicketPrice: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 15 },
+  paymentTicketTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  paymentTicketText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: 3 },
+  paymentTicketPrice: { color: COLORS.navy, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 15 },
   paymentMethod: { alignItems: "center", borderColor: COLORS.controlBorder, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, minHeight: 62, padding: 11 },
   paymentMethodActive: { backgroundColor: "#f3f8ff", borderColor: COLORS.controlBorder },
   paymentMethodIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 38, justifyContent: "center", width: 38 },
   paymentMethodCopy: { flex: 1 },
-  paymentMethodTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 13 },
-  paymentMethodText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 3 },
+  paymentMethodTitle: { color: COLORS.ink, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 13 },
+  paymentMethodText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: 3 },
   paymentCardFields: { marginTop: 14 },
   paymentCardFieldsRow: { flexDirection: "row", gap: 9, marginTop: 10 },
   paymentCardFieldHalf: { flex: 1 },
-  paymentFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontSize: 12, marginBottom: 6 },
+  paymentFieldLabel: { color: COLORS.navyDark, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginBottom: 6 },
   paymentLast4Label: { marginTop: 14 },
-  paymentCardInput: { backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 9, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, minHeight: 48, paddingHorizontal: 11 },
+  paymentCardInput: { backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 9, borderWidth: 1, color: COLORS.ink, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 14, minHeight: 52, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   accountModeRow: { flexDirection: "row", gap: 8, marginBottom: 18 },
-  accountMode: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, flex: 1, paddingVertical: 10 },
-  accountModeActive: { backgroundColor: COLORS.navy },
-  accountModeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  accountMode: { alignItems: "center", justifyContent: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, flex: 1, minHeight: 48, paddingHorizontal: PAGE_LAYOUT.fieldGap, paddingVertical: PAGE_LAYOUT.gap },
+  accountModeActive: { backgroundColor: "#123a63" },
+  accountModeText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   accountModeTextActive: { color: "#ffffff" },
   accountPasswordLabel: { marginTop: 12 },
-  accountError: { color: "#a31d1d", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 10 },
+  accountError: { color: "#a31d1d", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 10 },
   accountSubmitDisabled: { opacity: 0.55 },
   pollResult: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 9, marginTop: 13, padding: 12 },
-  pollResultText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  pollResultText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   paymentAddCardRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 8, marginTop: 10, minHeight: 48, paddingHorizontal: 3 },
-  paymentAddCardText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.semibold, fontSize: 13 },
-  paymentSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 20, minHeight: 50, paddingHorizontal: 14 },
+  paymentAddCardText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  paymentSubmitButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 11, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: PAGE_LAYOUT.section, minHeight: 50, paddingHorizontal: PAGE_LAYOUT.block, paddingVertical: PAGE_LAYOUT.gap },
   paymentSubmitButtonDisabled: { backgroundColor: "#90a0b2" },
-  paymentSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 13 },
+  paymentSubmitText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, flexShrink: 1, textAlign: "center" },
   savedPaymentCard: { backgroundColor: COLORS.navy, borderRadius: 15, marginTop: 2, overflow: "hidden", padding: 15 },
   savedPaymentCardTop: { alignItems: "center", flexDirection: "row", gap: 11 },
   savedPaymentCardIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
-  savedPaymentCardLabel: { color: "#d7e9fb", fontFamily: FONTS.medium, fontSize: 12 },
-  savedPaymentCardNumber: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 17, letterSpacing: 0.7, marginTop: 4 },
-  removePaymentCardButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 15, minHeight: 42 },
-  removePaymentCardText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
-  paymentMethodsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },
-  paymentFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 11, textAlign: "center" },
+  savedPaymentCardLabel: { color: "#d7e9fb", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
+  savedPaymentCardNumber: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 17, letterSpacing: 0.7, marginTop: 4 },
+  removePaymentCardButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 15, minHeight: 44 },
+  removePaymentCardText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
+  paymentMethodsFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },
+  paymentFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 11, textAlign: "center" },
   paymentSuccessHero: { marginTop: 18 },
   paymentSuccessIcon: { alignItems: "center", backgroundColor: COLORS.green, borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
-  paymentSuccessKicker: { color: "#b9e7b2", fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.8, marginTop: 12 },
-  paymentSuccessTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 24 },
-  paymentSuccessText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  paymentSuccessKicker: { color: "#b9e7b2", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, letterSpacing: 0.8, marginTop: 12 },
+  paymentSuccessTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24 },
+  paymentSuccessText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
   demoTicket: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 17, borderStyle: "dashed", borderWidth: 1, marginTop: 14, overflow: "hidden", padding: 16 },
   demoTicketTop: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between" },
-  demoTicketLabel: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 10, letterSpacing: 0.7 },
-  demoTicketTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 20, marginTop: 4 },
+  demoTicketLabel: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, letterSpacing: 0.7 },
+  demoTicketTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 20, marginTop: 4 },
   demoQr: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 15, paddingVertical: 16 },
   demoQrInner: { alignItems: "center", backgroundColor: "#f4f7fb", borderRadius: 8, height: 96, justifyContent: "center", width: 96 },
   demoTicketMeta: { flexDirection: "row", justifyContent: "space-between", marginTop: 13 },
-  demoTicketMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 11 },
+  demoTicketMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
   paymentNextCard: { backgroundColor: COLORS.blueSurface, borderRadius: 14, marginTop: 13, padding: 14 },
-  paymentNextTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14 },
-  paymentNextText: { color: "#40546b", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  paymentNextTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  paymentNextText: { color: "#40546b", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 5 },
   paymentSecondaryButton: { alignItems: "center", alignSelf: "center", flexDirection: "row", gap: 7, marginTop: 18, padding: 8 },
-  paymentSecondaryButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  eventsContent: { flexGrow: 1, paddingBottom: 32, paddingHorizontal: 20 },
+  paymentSecondaryButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  eventsContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   eventsSourceNote: { alignItems: "flex-start", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 9, marginTop: 14, padding: 12 },
-  eventsSourceText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18 },
+  eventsSourceText: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18 },
   eventsDayGroup: { marginTop: 19 },
-  eventsDayHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 7 },
+  eventsDayHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, marginBottom: 7 },
   eventsList: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, overflow: "hidden" },
   eventRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 76, paddingHorizontal: 12, paddingVertical: 10 },
   eventDateBadge: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
-  eventDateBadgeDay: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 16, lineHeight: 17 },
-  eventDateBadgeMonth: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 8, letterSpacing: 0.4, marginTop: 1 },
+  eventDateBadgeDay: { color: COLORS.navy, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 16, lineHeight: 17 },
+  eventDateBadgeMonth: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 8, letterSpacing: 0.4, marginTop: 1 },
   eventCopy: { flex: 1 },
   eventTopLine: { alignItems: "flex-start", flexDirection: "row", gap: 7 },
-  eventTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontSize: 13, lineHeight: 18 },
-  eventCategory: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 10, maxWidth: 64, textAlign: "right" },
-  eventMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, marginTop: 3 },
-  parkingContent: { paddingBottom: 32, paddingHorizontal: 20 },
+  eventTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, lineHeight: 18 },
+  eventCategory: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, maxWidth: 64, textAlign: "right" },
+  eventMeta: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 16, marginTop: 3 },
+  parkingContent: { paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   parkingHero: { backgroundColor: COLORS.navy, borderRadius: 16, marginTop: 18, padding: 17 },
   parkingHeroTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   parkingHeroIcon: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
   parkingHeroBadge: { backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(247,190,61,0.35)", borderRadius: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 5 },
-  parkingHeroBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
-  parkingHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontSize: 20, marginTop: 15 },
-  parkingHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  parkingHeroBadgeText: { color: "#f7be3d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.5 },
+  parkingHeroTitle: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 20, marginTop: 15 },
+  parkingHeroText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
   parkingSectionHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 14 },
   parkingActionList: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 16, overflow: "hidden" },
   parkingActionRow: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 76, paddingHorizontal: 12, paddingVertical: 10 },
@@ -3871,168 +3637,177 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   parkingActionHeading: { alignItems: "center", flexDirection: "row", gap: 10 },
   parkingActionIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
   parkingActionCopy: { flex: 1 },
-  parkingActionTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
-  parkingActionText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 2 },
-  parkingActionLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12, marginTop: 10 },
+  parkingActionTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, lineHeight: 19 },
+  parkingActionText: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 2 },
+  parkingActionLink: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12, marginTop: 10 },
   parkingInfoNote: { alignItems: "flex-start", backgroundColor: "#fff8e9", borderColor: "#f2dcaa", borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 14, padding: 12 },
   parkingInfoCopy: { flex: 1 },
   parkingUnavailable: { backgroundColor: "#fff8e9", borderColor: "#f2dcaa", borderRadius: 14, borderWidth: 1, marginTop: 7, padding: 14 },
-  parkingUnavailableTitle: { color: "#624600", fontFamily: FONTS.semibold, fontSize: 14 },
-  parkingUnavailableText: { color: "#735817", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 7 },
-  parkingUnavailableLink: { color: "#624600", fontFamily: FONTS.semibold, fontSize: 12, marginTop: 10 },
+  parkingUnavailableTitle: { color: "#624600", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  parkingUnavailableText: { color: "#735817", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 7 },
+  parkingUnavailableLink: { color: "#624600", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12, marginTop: 10 },
   subtitle: { color: "#43474e", fontSize: 16, marginTop: 4 },
   dataUpdated: { color: "#5b6e80", fontSize: 13, marginTop: 6 },
   dataSourcesLink: { color: "#123a63", fontSize: 13, fontWeight: "700", marginTop: 8 },
-  searchInput: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13, paddingVertical: 10 },
+  searchInput: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, paddingVertical: 10 },
   searchModes: { flexDirection: "row", gap: 8, marginTop: 11 },
   searchMode: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.controlBorder, borderRadius: 9, borderWidth: 1, flex: 1, minHeight: 44, justifyContent: "center" },
   searchModeActive: { backgroundColor: COLORS.navy, borderColor: COLORS.navy },
-  searchModeText: { color: "#596574", fontFamily: FONTS.medium, fontSize: 12 },
-  searchModeTextActive: { color: "#ffffff", fontFamily: FONTS.semibold },
+  searchModeText: { color: "#596574", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
+  searchModeTextActive: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600" },
   list: { paddingBottom: 22, paddingHorizontal: 20, paddingTop: 16 },
-  transportListHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginBottom: 9 },
-  transportSavedHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: -4 },
+  transportListHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, marginBottom: 9 },
+  transportSavedHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: -4 },
   routeCard: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, minHeight: 64, paddingHorizontal: 11, paddingVertical: 8 },
-  routeBadge: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 8, justifyContent: "center", minWidth: 47, paddingHorizontal: 7, paddingVertical: 8 },
-  routeBadgeText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 15 },
+  routeTapArea: { flex: 1, minWidth: 0, minHeight: 48, flexDirection: "row", gap: 11, alignItems: "center" },
+  routeBadge: { alignItems: "center", backgroundColor: "#123a63", borderRadius: 8, justifyContent: "center", minWidth: 47, paddingHorizontal: 7, paddingVertical: 8 },
+  routeBadgeText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
   routeCardCopy: { flex: 1 },
-  routeName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  routeCardMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
+  routeName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 14, lineHeight: 19 },
+  routeCardMeta: { color: COLORS.tertiary, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 3 },
   favoriteButton: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
   stopCard: { alignItems: "center", backgroundColor: "#ffffff", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 64, paddingHorizontal: 11, paddingVertical: 8 },
   stopCardText: { flex: 1 },
-  stopCardName: { color: COLORS.ink, fontFamily: FONTS.medium, fontSize: 14, lineHeight: 19 },
-  stopCardAction: { color: COLORS.tertiary, fontFamily: FONTS.medium, fontSize: 12, marginTop: 3 },
-  empty: { color: COLORS.muted, fontFamily: FONTS.regular, textAlign: "center" },
+  stopCardName: { color: COLORS.ink, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 14, lineHeight: 19 },
+  stopCardAction: { color: COLORS.tertiary, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginTop: 3 },
+  empty: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", textAlign: "center" },
   transportEmptyState: { alignItems: "center", backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginTop: 6, padding: 22 },
   transportEmptyIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 48, justifyContent: "center", width: 48 },
-  transportEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginTop: 12, textAlign: "center" },
-  transportEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
+  transportEmptyTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, marginTop: 12, textAlign: "center" },
+  transportEmptyText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: "center" },
   transportEmptyActions: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16 },
   transportEmptyPrimaryAction: { backgroundColor: COLORS.navy, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
-  transportEmptyPrimaryActionText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 12 },
+  transportEmptyPrimaryActionText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   transportEmptySecondaryAction: { backgroundColor: COLORS.blueSurface, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
-  transportEmptySecondaryActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  transportEmptySecondaryActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   back: { color: "#123a63", fontSize: 16, fontWeight: "600", marginTop: 20 },
   stopDetailsHeading: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 16 },
-  stopDetailsTitle: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.bold, fontSize: 23, lineHeight: 29 },
-  stopDetailsSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
-  stopDetailsCode: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12, marginTop: 4 },
+  stopDetailsTitle: { color: COLORS.navyDark, flex: 1, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 23, lineHeight: 29 },
+  stopDetailsSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 4 },
+  stopDetailsCode: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, marginTop: 4 },
   routeHeader: { alignItems: "center", flexDirection: "row", gap: 12, marginVertical: 16 },
   routeDetailHero: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, marginBottom: 12, marginTop: 10, padding: 14 },
   routeDetailTopLine: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   routeDetailRouteIdentity: { alignItems: "center", flexDirection: "row", gap: 8 },
-  routeDetailRouteLabel: { color: "#c9d8ee", fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.8 },
-  routeDetailRouteBadge: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, height: 42, justifyContent: "center", minWidth: 46, paddingHorizontal: 8 },
-  routeDetailRouteNumber: { color: COLORS.navy, fontFamily: FONTS.bold, fontSize: 22, lineHeight: 26 },
+  routeDetailRouteLabel: { color: COLORS.muted, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
+  routeDetailRouteBadge: { alignItems: "center", backgroundColor: "#123a63", borderRadius: 10, height: 44, justifyContent: "center", minWidth: 52, paddingHorizontal: 10 },
+  routeDetailRouteNumber: { color: "#ffffff", fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24, lineHeight: 30 },
   routeDetailPlanMark: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 8, flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingVertical: 6 },
-  routeDetailPlanMarkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 9, letterSpacing: 0.5 },
-  routeDetailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 19, lineHeight: 25, marginTop: 10 },
-  routeDetailTermini: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 5 },
+  routeDetailPlanMarkText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 9, letterSpacing: 0.5 },
+  routeDetailTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 19, lineHeight: 25, marginTop: 10 },
+  routeDetailTermini: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 5 },
   routeDetailSource: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 14 },
-  routeDetailSourceText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontSize: 11, flex: 1, lineHeight: 16 },
+  routeDetailSourceText: { color: "#d3e4ff", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, flex: 1, lineHeight: 16 },
   routeMapPreview: { borderColor: COLORS.border, borderRadius: 13, borderWidth: 1, height: 170, marginBottom: 10, overflow: "hidden" },
   routeMapPreviewMap: { flex: 1 },
   routeMapPreviewLabel: { backgroundColor: "rgba(255,255,255,0.96)", borderColor: "#d4e0ec", borderRadius: 8, borderWidth: 1, bottom: 10, left: 10, paddingHorizontal: 10, paddingVertical: 7, position: "absolute" },
-  routeMapPreviewLabelText: { color: "#123a63", fontFamily: FONTS.medium, fontSize: 11 },
+  routeMapPreviewLabelText: { color: "#123a63", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
   transportDataNotice: { backgroundColor: "#eef4ff", borderRadius: 14, marginTop: 14, padding: 13 },
   transportDataNoticeTitle: { color: "#123a63", fontSize: 14, fontWeight: "700" },
   transportDataNoticeText: { color: "#43474e", fontSize: 13, lineHeight: 18, marginTop: 5 },
-  hint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginBottom: 8 },
+  hint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginBottom: 8 },
   mapButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "center", marginBottom: 14, minHeight: 47, padding: 13 },
-  mapButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 13 },
-  stopsIntro: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
-  stopsHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 16 },
+  mapButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
+  stopsIntro: { alignItems: "center", flexDirection: "row", gap: PAGE_LAYOUT.gap, justifyContent: "space-between", marginTop: PAGE_LAYOUT.fieldGap, marginBottom: PAGE_LAYOUT.block },
+  stopsIntroCopy: { flex: 1, minWidth: 0 },
+  stopsHeading: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 16 },
   stopsCountPill: { alignItems: "center", backgroundColor: "#e7eeff", borderRadius: 14, height: 28, justifyContent: "center", minWidth: 28, paddingHorizontal: 8 },
-  stopsCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
-  transportDetailScreen: { flex: 1, backgroundColor: "#f6f7fb", paddingHorizontal: 20 },
-  stopDetailsList: { paddingBottom: 22, paddingTop: 16 },
+  stopsCountText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
+  transportDetailScreen: { flex: 1, backgroundColor: "#f6f7fb" },
+  stopDetailsList: { paddingBottom: PAGE_LAYOUT.bottom, paddingTop: PAGE_LAYOUT.block },
   detailsList: { paddingBottom: 32 },
-  routeDetailsContent: { paddingBottom: 34, paddingHorizontal: 20 },
+  routeDetailsContent: { paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   directionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 13, flexDirection: "row", gap: 12, marginBottom: 10, padding: 11 },
   directionCopy: { flex: 1 },
-  directionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
-  directionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 3 },
+  directionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
+  directionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 3 },
   directionSwitchButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 10, flexDirection: "row", gap: 5, minHeight: 44, paddingHorizontal: 10 },
-  directionButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 12 },
+  directionButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   variant: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, overflow: "hidden", padding: 14 },
   variantHeading: { alignItems: "center", flexDirection: "row", gap: 7, marginBottom: 11 },
-  variantTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
-  stopRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 47 },
+  variantTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  stopRow: { alignItems: "center", flexDirection: "row", gap: PAGE_LAYOUT.gap, minHeight: 52, paddingVertical: PAGE_LAYOUT.fieldGap },
   stopSequence: { alignItems: "center", alignSelf: "stretch", justifyContent: "center", width: 17 },
   stopDot: { backgroundColor: "#a6c9fa", borderRadius: 4, height: 8, width: 8, zIndex: 1 },
   stopDotStart: { backgroundColor: COLORS.green, height: 10, width: 10 },
   stopDotEnd: { backgroundColor: COLORS.gold, height: 10, width: 10 },
   stopLine: { backgroundColor: "#d3e4ff", bottom: -2, position: "absolute", top: 26, width: 2 },
-  stopName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
+  stopName: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13 },
   stopScheduleLink: { alignItems: "center", flexDirection: "row", gap: 1 },
-  stopSchedule: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 11 },
-  scheduleTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 23, marginTop: 16 },
-  scheduleSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 4 },
+  stopSchedule: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 11 },
+  scheduleTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 23, marginTop: 16 },
+  scheduleSubtitle: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 4 },
   dateControls: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 8 },
-  dateButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 20, height: 40, justifyContent: "center", width: 40 },
-  dateButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 20 },
-  selectedDate: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 15, marginTop: 2 },
-  sourcesTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 25, marginTop: 18 },
-  sourcesList: { gap: 10, paddingBottom: 32, paddingHorizontal: 20, paddingTop: 16 },
-  sourceCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: 14 },
-  sourceCardTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontSize: 15 },
-  sourceText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 6 },
-  sourceUrl: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, marginTop: 9 },
+  dateButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  dateButtonText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 20 },
+  selectedDate: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, marginTop: 2 },
+  sourcesTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 25, marginTop: 18 },
+  sourcesList: { paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
+  sourcesFirstCard: { marginTop: PAGE_LAYOUT.block },
+  sourceCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 14, borderWidth: 1, padding: PAGE_LAYOUT.block, marginTop: PAGE_LAYOUT.gap },
+  sourceCardTitle: { color: COLORS.ink, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15 },
+  sourceText: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 6 },
+  sourceUrl: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, marginTop: 9 },
   departure: { alignItems: "center", borderBottomColor: COLORS.border, borderBottomWidth: 1, flexDirection: "row", gap: 14, minHeight: 60, paddingHorizontal: 4, paddingVertical: 10 },
-  departureTime: { color: COLORS.navy, fontFamily: FONTS.semibold, fontSize: 19 },
-  departureDestination: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontSize: 13 },
+  departureTime: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 19 },
+  departureDestination: { color: COLORS.ink, flex: 1, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13 },
   mapScreen: { flex: 1, backgroundColor: "#f8f9ff" },
   cityMapScreen: { flex: 1, backgroundColor: "#f6f7fb" },
-  cityMapHeader: { paddingHorizontal: 20 },
-  cityMapTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 24, marginTop: 9 },
-  cityMapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginBottom: 12, marginTop: 3 },
+  cityMapHeader: { paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
+  cityMapTitle: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 24, marginTop: 9 },
+  cityMapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginBottom: 12, marginTop: 3 },
   cityMapCanvas: { flex: 1 },
-  cityMapSource: { alignItems: "center", backgroundColor: "#ffffff", borderTopColor: COLORS.border, borderTopWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingHorizontal: 20 },
-  cityMapSourceText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.medium, fontSize: 11 },
-  mapHeader: { backgroundColor: "#f8f9ff", paddingHorizontal: 20, paddingVertical: 9 },
-  mapTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 17, lineHeight: 23, marginTop: 9 },
-  mapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, marginTop: 3 },
-  mapDirectionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: 10, marginBottom: 10, marginHorizontal: 20, padding: 10 },
+  cityMapSelection: { backgroundColor: "#ffffff", paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.fieldGap, paddingBottom: PAGE_LAYOUT.gap, borderTopWidth: 1, borderTopColor: COLORS.border },
+  cityMapSelectionHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  cityMapSelectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 15, flex: 1 },
+  cityMapSelectionAddress: { color: COLORS.ink, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 20 },
+  cityMapDirections: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, marginTop: PAGE_LAYOUT.fieldGap, paddingVertical: PAGE_LAYOUT.fieldGap },
+  cityMapDirectionsText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13, flex: 1 },
+  cityMapSource: { alignItems: "center", backgroundColor: "#ffffff", borderTopColor: COLORS.border, borderTopWidth: 1, flexDirection: "row", gap: 8, minHeight: 54, paddingHorizontal: PAGE_LAYOUT.gutter, paddingVertical: PAGE_LAYOUT.gap },
+  cityMapSourceText: { color: COLORS.navy, flex: 1, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11 },
+  mapHeader: { backgroundColor: "#f8f9ff", paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top, paddingBottom: PAGE_LAYOUT.gap },
+  mapTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 17, lineHeight: 23, marginTop: 9 },
+  mapHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, marginTop: 3 },
+  mapDirectionSwitch: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 12, flexDirection: "row", gap: PAGE_LAYOUT.gap, marginBottom: PAGE_LAYOUT.gap, marginHorizontal: PAGE_LAYOUT.gutter, padding: PAGE_LAYOUT.gap },
   mapDirectionCopy: { flex: 1 },
-  mapDirectionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
-  mapDirectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, marginTop: 2 },
+  mapDirectionLabel: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10, letterSpacing: 0.3, textTransform: "uppercase" },
+  mapDirectionTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, marginTop: 2 },
   mapDirectionButton: { alignItems: "center", backgroundColor: "#ffffff", borderRadius: 9, flexDirection: "row", gap: 5, minHeight: 44, paddingHorizontal: 10 },
   mapCanvas: { flex: 1, position: "relative" },
-  mapGpsStatus: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.95)", borderRadius: 14, flexDirection: "row", gap: 6, left: 12, paddingHorizontal: 9, paddingVertical: 6, position: "absolute", top: 12 },
+  mapGpsStatus: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#ffffff", borderRadius: 14, flexDirection: "row", gap: 6, left: 12, maxWidth: "92%", paddingHorizontal: 9, paddingVertical: 6, position: "absolute", top: 12 },
   mapGpsDot: { borderRadius: 4, height: 8, width: 8 },
   mapGpsDotLive: { backgroundColor: "#2e673d" },
   mapGpsDotStale: { backgroundColor: "#b7791f" },
   mapGpsDotOffline: { backgroundColor: "#718096" },
-  mapGpsStatusText: { color: COLORS.navy, fontFamily: FONTS.medium, fontSize: 11, lineHeight: 15 },
+  mapGpsStatusText: { color: COLORS.navy, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12, lineHeight: 18, flexShrink: 1 },
   mapStopCard: { backgroundColor: "#ffffff", borderColor: COLORS.border, borderRadius: 15, borderWidth: 1, left: 16, padding: 13, position: "absolute", right: 16, shadowColor: "#071d31", shadowOffset: { height: 5, width: 0 }, shadowOpacity: 0.14, shadowRadius: 13, top: 14 },
   mapStopCardWithGps: { top: 60 },
   mapStopCardTop: { alignItems: "center", flexDirection: "row", gap: 10 },
   mapStopIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 9, height: 37, justifyContent: "center", width: 37 },
   mapStopCopy: { flex: 1 },
-  mapStopName: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 14, lineHeight: 19 },
-  mapStopDirection: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11, marginTop: 2 },
+  mapStopName: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14, lineHeight: 19 },
+  mapStopDirection: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, marginTop: 2 },
   mapStopScheduleLoading: { alignItems: "center", flexDirection: "row", gap: 7, marginTop: 13 },
-  mapStopScheduleText: { color: COLORS.muted, fontFamily: FONTS.medium, fontSize: 12 },
+  mapStopScheduleText: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 12 },
   mapStopSchedule: { borderTopColor: COLORS.border, borderTopWidth: 1, marginTop: 12, paddingTop: 10 },
-  mapStopScheduleLabel: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 11 },
+  mapStopScheduleLabel: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11 },
   mapStopTimes: { flexDirection: "row", gap: 7, marginTop: 7 },
   mapStopTimePill: { backgroundColor: "#eff5ff", borderRadius: 10, flex: 1, paddingHorizontal: 8, paddingVertical: 7 },
-  mapStopScheduleTime: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontSize: 17 },
-  mapStopMinutesText: { color: "#2e673d", fontFamily: FONTS.semibold, fontSize: 10, marginTop: 2 },
-  mapStopEmpty: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 12 },
-  mapStopError: { color: "#9a3412", fontFamily: FONTS.regular, fontSize: 12, lineHeight: 17, marginTop: 12 },
-  mapStopFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 10, marginTop: 9 },
+  mapStopScheduleTime: { color: COLORS.navyDark, fontFamily: FONTS.bold, fontWeight: "700", fontSize: 17 },
+  mapStopMinutesText: { color: "#2e673d", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 10, marginTop: 2 },
+  mapStopEmpty: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 12 },
+  mapStopError: { color: "#9a3412", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 17, marginTop: 12 },
+  mapStopFootnote: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 10, marginTop: 9 },
   loadingIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 56, justifyContent: "center", width: 56 },
   loadingSpinner: { marginTop: 17 },
-  loadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 18, marginTop: 11 },
-  loadingText: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 13, marginTop: 5, textAlign: "center" },
+  loadingTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 18, marginTop: 11 },
+  loadingText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, marginTop: 5, textAlign: "center" },
   errorIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 24, height: 56, justifyContent: "center", width: 56 },
-  errorTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontSize: 19, marginTop: 15 },
-  errorText: { color: "#596574", fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, marginTop: 8, textAlign: "center" },
-  errorHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, marginTop: 12, maxWidth: 310, textAlign: "center" },
+  errorTitle: { color: COLORS.navyDark, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 19, marginTop: 15 },
+  errorText: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 13, lineHeight: 19, marginTop: 8, textAlign: "center" },
+  errorHint: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 12, maxWidth: 310, textAlign: "center" },
   retryButton: { alignItems: "center", backgroundColor: COLORS.navy, borderRadius: 10, flexDirection: "row", gap: 8, marginTop: 20, minHeight: 48, paddingHorizontal: 18 },
-  retryText: { color: "#ffffff", fontFamily: FONTS.semibold, fontSize: 14 },
+  retryText: { color: "#ffffff", fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 14 },
 });
 
 function themedStyleValue(property: string, value: unknown, isDark: boolean): unknown {

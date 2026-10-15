@@ -13,32 +13,71 @@
     input,select,textarea { border:1px solid #aab8c7; border-radius:9px; padding:12px; }
     textarea { font:13px ui-monospace,monospace; min-height:360px; }
     button { background:#123a63; border:0; border-radius:9px; color:white; cursor:pointer; font-weight:700; padding:13px; }
-    #status { color:#3d6836; font-weight:650; min-height:24px; margin-top:14px; }
+    #status { color:#123a63; font-weight:650; min-height:24px; margin-top:14px; }
     .note { background:#eaf2ff; border-radius:10px; margin-top:20px; padding:14px; }
+    [hidden] { display:none !important; } button:disabled { opacity:.55; cursor:default; }
+    .row { display:flex; flex-wrap:wrap; gap:12px; } .row > * { flex:1; min-width:160px; }
+    .secondary { color:#123a63; background:#e6edf6; } .danger { color:#a31d1d; background:#fff0ee; }
+    .event { padding:16px; background:white; border:1px solid #d5dee9; border-radius:12px; margin-top:12px; }
+    .event h3 { margin:0; overflow-wrap:anywhere; } .event p { margin:8px 0; }
+    .event button { width:auto; margin-right:8px; min-height:44px; } fieldset { border:1px solid #aab8c7; border-radius:12px; padding:16px; margin-top:20px; }
+    #content { min-height:260px; } .unsaved { color:#8a3b00; } input:focus,select:focus,textarea:focus,button:focus-visible { outline:3px solid #1581d5; outline-offset:2px; }
+    dialog { border:1px solid #aab8c7; border-radius:16px; color:#10243b; max-width:440px; padding:24px; width:calc(100% - 80px); }
+    dialog::backdrop { background:rgba(16,36,59,.45); } dialog h2 { margin-top:0; } dialog p { overflow-wrap:anywhere; }
   </style>
 </head>
 <body><main>
   <h1>Редактор контенту</h1>
-  <p>Тут працівник оновлює лише дані, а не код застосунку. Ключ редактора зберігається у змінній сервера, не в цьому файлі.</p>
+  <p>Завантажте список, додайте або змініть записи, а тоді опублікуйте зміни. Ключ не зберігається в браузері.</p>
   <label>Ключ редактора<input id="key" type="password" autocomplete="current-password"></label>
-  <label>Розділ<select id="document"><option value="events">Події</option><option value="defender-funds">Перевірені збори</option></select></label>
+  <label>Розділ<select id="document"><option value="events">Події міста</option><option value="shelters">Укриття</option><option value="resilience">Пункти незламності</option><option value="defender-funds">Перевірені збори</option></select></label>
   <button id="load">Завантажити дані</button>
-  <label>Дані у форматі JSON<textarea id="content" spellcheck="false">{
-  "items": []
-}</textarea></label>
-  <button id="save">Зберегти та опублікувати</button>
+  <div id="workspace" hidden>
+    <p id="draft-state"></p>
+    <p id="map-notice" class="note" hidden>Перша публікація створить редакторський перелік замість автоматичного джерела. Надалі правки джерела не додаються автоматично. Перевіряйте адресу та вхід; публікація не підтверджує, що об’єкт відкритий. Видалення прибирає точку з карти лише після публікації.</p>
+    <button id="add" class="secondary">Додати подію</button>
+    <form id="event-form" hidden>
+      <fieldset><legend>Подія міста</legend>
+        <label>Назва<input id="title" required maxlength="300"></label>
+        <div class="row"><label>Дата<input id="date" type="date" required></label><label>Час (за Києвом)<input id="time" type="time"></label></div>
+        <label>Категорія<select id="category"><option>Концерти</option><option>Театр</option><option>Виставки</option><option>Лекції та зустрічі</option><option>Майстер-класи</option><option>Спорт</option><option>Для дітей</option><option>Фестивалі</option><option>Інше</option></select></label>
+        <label>Місце проведення<input id="venue" required maxlength="300"></label>
+        <label>Адреса<input id="address" maxlength="500" placeholder="Ужгород, вулиця, номер"></label>
+        <label>Опис<textarea id="description" required maxlength="6000" style="min-height:120px;font:inherit"></textarea></label>
+        <label>Сторінка події / реєстрація / квитки<input id="sourceUrl" type="url" required placeholder="https://..."></label>
+        <label>Посилання на постер (необов’язково)<input id="posterUrl" type="url" placeholder="https://..."></label>
+        <label>Організатор (необов’язково)<input id="organizer" maxlength="300"></label>
+        <label>Дата перевірки інформації<input id="verifiedAt" type="date" required></label>
+        <div class="row"><button type="submit">Додати до списку змін</button><button id="cancel-edit" type="button" class="secondary">Скасувати редагування</button></div>
+      </fieldset>
+    </form>
+    <form id="point-form" hidden>
+      <fieldset><legend id="point-legend">Точка на мапі</legend>
+        <label>Назва<input id="point-name" required maxlength="300" placeholder="Назва об’єкта"></label>
+        <label>Адреса<input id="point-address" required maxlength="500" placeholder="Ужгород, вулиця, номер будинку"></label>
+        <div class="row"><label>Широта<input id="point-latitude" required inputmode="decimal" placeholder="48.6208"></label><label>Довгота<input id="point-longitude" required inputmode="decimal" placeholder="22.2879"></label></div>
+        <p>Скопіюйте координати точного входу з карти: спочатку широта (48…), потім довгота (22…). Координати прикладу не підставляються автоматично.</p>
+        <a id="point-map" href="https://www.openstreetmap.org/#map=15/48.6208/22.2879" target="_blank" rel="noopener noreferrer">Перевірити місце на карті ↗</a>
+        <label>Опис входу / додаткова інформація<textarea id="point-description" maxlength="2000" style="min-height:110px;font:inherit" placeholder="Де розташований вхід, підтверджені умови доступу"></textarea></label>
+        <label>Джерело інформації (необов’язково)<input id="point-sourceUrl" type="url" maxlength="2000" placeholder="https://..."></label>
+        <label>Дата фактичної перевірки (необов’язково)<input id="point-verifiedAt" type="date"></label>
+        <p>Залиште дату порожньою, якщо ще не перевіряли. Не публікуйте непідтверджені твердження про безпечність чи доступність.</p>
+        <div class="row"><button type="submit">Додати до списку змін</button><button id="cancel-point" type="button" class="secondary">Скасувати редагування</button></div>
+      </fieldset>
+    </form>
+    <label id="search-label">Знайти запис<input id="search" type="search" placeholder="Назва або адреса"></label>
+    <div id="events-list"></div>
+    <details id="advanced"><summary style="padding-top:24px;cursor:pointer">Розширений редактор JSON</summary>
+      <label>Дані<textarea id="content" spellcheck="false"></textarea></label>
+      <button id="apply-json" class="secondary">Застосувати JSON до списку змін</button>
+    </details>
+    <button id="save">Опублікувати зміни</button>
+  </div>
   <div id="status" role="status"></div>
   <div class="note"><strong>Важливо.</strong> Перед публікацією перевіряйте адресу, дату й пряме посилання. Для бойових зборів — ще джерело підтвердження та дату перевірки.</div>
-</main><script>
-  const key = document.querySelector('#key'); const documentKey = document.querySelector('#document');
-  const content = document.querySelector('#content'); const status = document.querySelector('#status');
-  async function request(method) {
-    const options = { method, headers: { 'X-Admin-Key': key.value } };
-    if (method === 'PUT') { options.headers['Content-Type'] = 'application/json'; options.body = content.value; }
-    const response = await fetch(`/api/admin/editorial/${documentKey.value}`, options);
-    if (!response.ok) throw new Error(response.status === 401 ? 'Неправильний ключ редактора.' : `Помилка сервера: ${response.status}`);
-    return response.json();
-  }
-  document.querySelector('#load').onclick = async () => { try { content.value = JSON.stringify(await request('GET'), null, 2); status.textContent = 'Дані завантажено.'; } catch (e) { status.textContent = e.message; } };
-  document.querySelector('#save').onclick = async () => { try { JSON.parse(content.value); content.value = JSON.stringify(await request('PUT'), null, 2); status.textContent = 'Опубліковано. Застосунок побачить зміни після наступного оновлення.'; } catch (e) { status.textContent = e instanceof SyntaxError ? 'JSON має помилку. Перевір коми та лапки.' : e.message; } };
-</script></body></html>
+</main>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+  <h2 id="confirm-title">Підтвердження змін</h2><p id="confirm-message"></p>
+  <form method="dialog"><div class="row"><button value="cancel" class="secondary">Скасувати</button><button value="accept">Підтвердити</button></div></form>
+</dialog>
+<script type="module" src="/admin/editor.js"></script></body></html>

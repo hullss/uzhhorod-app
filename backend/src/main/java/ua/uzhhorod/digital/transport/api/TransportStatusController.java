@@ -123,7 +123,10 @@ public class TransportStatusController {
     @PostMapping("/imports/gtfs")
     public GtfsImportResponse importGtfsRoutes(
             @RequestHeader(value = "X-Transport-Import-Token", required = false) String providedToken) {
-        if (!importToken.isBlank() && !tokensMatch(providedToken, importToken)) {
+        if (importToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Transport import token is not configured");
+        }
+        if (!tokensMatch(providedToken, importToken)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Invalid transport import token");
         }
         var result = gtfsRouteImportService.importTransportData();

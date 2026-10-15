@@ -1,3 +1,11 @@
+import { requestJson } from "./request";
+import { decodeBuildings, decodeCurrency, decodeFunds, decodeNews, decodeWeather } from "./catalogues";
+import { decodeEventCatalog, type EventCatalog } from "../events/catalog";
+import { decodeOfficialNewsArticle, type OfficialNewsArticle } from "../news/article";
+import { decodeSafetyMapPoints, type SafetyMapPoints } from "../maps/safety";
+export type { SafetyMapPoint, SafetyMapPoints } from "../maps/safety";
+export type { OfficialNewsArticle } from "../news/article";
+
 export type AccessibleBuilding = {
   id: string;
   name: string;
@@ -36,18 +44,12 @@ export type OfficialNewsList = {
   items: OfficialNewsItem[];
 };
 
-export type OfficialNewsArticle = {
-  title: string;
-  sourceUrl: string;
-  publishedLabel: string | null;
-  preview: string;
-};
-
 export type CurrencyRate = {
   code: "USD" | "EUR" | "HUF" | "CZK";
   buy: number;
   sell: number;
   updatedAt: string;
+  reference?: boolean;
 };
 
 export type CurrencyRates = {
@@ -134,32 +136,7 @@ export type AirAlertEvents = {
   events: AirAlertEvent[];
 };
 
-export type SafetyMapPoint = {
-  id: string;
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-};
-
-export type SafetyMapPoints = {
-  fetchedAt: string;
-  stale: boolean;
-  points: SafetyMapPoint[];
-};
-
-export type EditorialEvent = {
-  id: string;
-  title: string;
-  dateLabel: string;
-  day: number;
-  time?: string;
-  venue: string;
-  category: string;
-  sourceUrl: string;
-};
-
-export type EditorialEvents = { items: EditorialEvent[] };
+export type EditorialEvents = EventCatalog;
 
 export type EditorialDefenderFund = {
   id: string;
@@ -172,29 +149,8 @@ export type EditorialDefenderFund = {
 
 export type EditorialDefenderFunds = { items: EditorialDefenderFund[] };
 
-const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
-const requestTimeoutMs = 8_000;
-
 async function request<T>(path: string, unavailableMessage: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-  try {
-    const response = await fetch(`${apiUrl}${path}`, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`${unavailableMessage}: HTTP ${response.status}`);
-    }
-    return response.json() as Promise<T>;
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`${unavailableMessage}: сервер не відповів за 8 секунд.`);
-    }
-    if (error instanceof TypeError) {
-      throw new Error(`${unavailableMessage}: перевірте бекенд і EXPO_PUBLIC_API_URL.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return requestJson<T>(path, `${unavailableMessage}. Спробуйте ще раз.`);
 }
 
 export async function getAccessibleBuildings(query?: string): Promise<AccessibleBuildingList> {
@@ -202,7 +158,7 @@ export async function getAccessibleBuildings(query?: string): Promise<Accessible
   const path = normalizedQuery
     ? `/api/city-services/accessibility/buildings?query=${encodeURIComponent(normalizedQuery)}`
     : "/api/city-services/accessibility/buildings";
-  return request(path, "Не вдалося завантажити реєстр");
+  return decodeBuildings(await request(path, "Не вдалося завантажити реєстр"));
 }
 
 export async function getLatestOpenDataDatasets(): Promise<OpenDataDatasetList> {
@@ -211,7 +167,7 @@ export async function getLatestOpenDataDatasets(): Promise<OpenDataDatasetList> 
 
 export async function getOfficialNews(forceRefresh = false): Promise<OfficialNewsList> {
   const path = forceRefresh ? "/api/city-services/news?refresh=1" : "/api/city-services/news";
-  return request(path, "Не вдалося завантажити офіційні новини");
+  return decodeNews(await request(path, "Не вдалося завантажити офіційні новини"));
 }
 
 export async function getOfficialNewsArticle(item: OfficialNewsItem): Promise<OfficialNewsArticle> {
@@ -219,15 +175,16 @@ export async function getOfficialNewsArticle(item: OfficialNewsItem): Promise<Of
   if (item.publishedLabel) {
     params.set("publishedLabel", item.publishedLabel);
   }
-  return request(`/api/city-services/news/article?${params.toString()}`, "Не вдалося завантажити короткий перегляд новини");
+  const response = await request<unknown>(`/api/city-services/news/article?${params.toString()}`, "Не вдалося завантажити новину");
+  return decodeOfficialNewsArticle(response, item);
 }
 
 export async function getCurrencyRates(): Promise<CurrencyRates> {
-  return request("/api/city-services/currency", "Не вдалося завантажити курси валют");
+  return decodeCurrency(await request("/api/city-services/currency", "Не вдалося завантажити курси валют"));
 }
 
 export async function getWeather(): Promise<Weather> {
-  return request("/api/city-services/weather", "Не вдалося завантажити погоду");
+  return decodeWeather(await request("/api/city-services/weather", "Не вдалося завантажити погоду"));
 }
 
 export async function getMiniSculptures(): Promise<MiniSculptureList> {
@@ -243,13 +200,13 @@ export async function getAirAlertEvents(): Promise<AirAlertEvents> {
 }
 
 export async function getSafetyMapPoints(kind: "shelters" | "resilience"): Promise<SafetyMapPoints> {
-  return request(`/api/city-services/maps/${kind}`, "Не вдалося завантажити позначки мапи");
+  return decodeSafetyMapPoints(await request<unknown>(`/api/city-services/maps/${kind}`, "Не вдалося завантажити позначки мапи"));
 }
 
 export async function getEditorialEvents(): Promise<EditorialEvents> {
-  return request("/api/editorial/events", "Не вдалося завантажити події");
+  return decodeEventCatalog(await request<unknown>("/api/editorial/events", "Не вдалося завантажити події"));
 }
 
 export async function getEditorialDefenderFunds(): Promise<EditorialDefenderFunds> {
-  return request("/api/editorial/defender-funds", "Не вдалося завантажити перевірені збори");
+  return decodeFunds(await request("/api/editorial/defender-funds", "Не вдалося завантажити перевірені збори"));
 }

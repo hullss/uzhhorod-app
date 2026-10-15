@@ -22,8 +22,8 @@ final class OfficialNewsParser {
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern META_TAG = Pattern.compile("(?is)<meta\\b[^>]*>");
     private static final Pattern CONTENT_ATTRIBUTE = Pattern.compile("(?is)\\bcontent\\s*=\\s*(['\"])(?<content>.*?)\\1");
+    private static final Pattern DESCRIPTION_ATTRIBUTE = Pattern.compile("(?is)\\b(?:name|property)\\s*=\\s*(['\"])(?:description|og:description)\\1");
     private static final Pattern ARTICLE = Pattern.compile("(?is)<article\\b[^>]*>(?<content>.*?)</article>");
-    private static final Pattern PARAGRAPH = Pattern.compile("(?is)<p\\b[^>]*>(?<content>.*?)</p>");
     private static final Pattern H1 = Pattern.compile("(?is)<h1\\b[^>]*>(?<content>.*?)</h1>");
 
     private OfficialNewsParser() {
@@ -53,23 +53,26 @@ final class OfficialNewsParser {
 
     static OfficialNewsArticleResponse parseArticle(String html, String sourceUrl, String publishedLabel) {
         String title = firstMatch(H1, html);
+        Matcher articleMatcher = ARTICLE.matcher(html);
+        String articleHtml = articleMatcher.find() ? articleMatcher.group("content") : "";
+        String bodyHtml = OfficialArticleExtractor.body(articleHtml);
+        var blocks = OfficialArticleExtractor.blocks(bodyHtml);
         String preview = metaDescription(html);
         if (preview.isBlank()) {
-            Matcher articleMatcher = ARTICLE.matcher(html);
-            String articleHtml = articleMatcher.find() ? articleMatcher.group("content") : "";
-            preview = paragraphPreview(articleHtml.isBlank() ? html : articleHtml);
+            preview = blocks.stream().map(OfficialNewsArticleResponse.Block::text)
+                    .collect(java.util.stream.Collectors.joining("\n\n"));
         }
-        return new OfficialNewsArticleResponse(title, sourceUrl, publishedLabel, trimToLength(preview, 720));
+        Matcher dateMatcher = UKRAINIAN_DATE.matcher(textContent(articleHtml));
+        if (dateMatcher.find()) publishedLabel = dateMatcher.group();
+        return new OfficialNewsArticleResponse(title, sourceUrl, publishedLabel, trimToLength(preview, 720),
+                blocks, OfficialArticleExtractor.links(bodyHtml, sourceUrl),
+                OfficialArticleExtractor.image(articleHtml, sourceUrl), !blocks.isEmpty());
     }
 
     private static String metaDescription(String html) {
         Matcher metaMatcher = META_TAG.matcher(html);
         while (metaMatcher.find()) {
-            String tag = metaMatcher.group().toLowerCase();
-            if (!tag.contains("name=\"description\"")
-                    && !tag.contains("name='description'")
-                    && !tag.contains("property=\"og:description\"")
-                    && !tag.contains("property='og:description'")) {
+            if (!DESCRIPTION_ATTRIBUTE.matcher(metaMatcher.group()).find()) {
                 continue;
             }
             Matcher contentMatcher = CONTENT_ATTRIBUTE.matcher(metaMatcher.group());
@@ -78,22 +81,6 @@ final class OfficialNewsParser {
             }
         }
         return "";
-    }
-
-    private static String paragraphPreview(String html) {
-        StringBuilder preview = new StringBuilder();
-        Matcher paragraphMatcher = PARAGRAPH.matcher(html);
-        while (paragraphMatcher.find() && preview.length() < 720) {
-            String paragraph = textContent(paragraphMatcher.group("content"));
-            if (paragraph.isBlank()) {
-                continue;
-            }
-            if (!preview.isEmpty()) {
-                preview.append("\n\n");
-            }
-            preview.append(paragraph);
-        }
-        return preview.toString();
     }
 
     private static String firstMatch(Pattern pattern, String html) {
@@ -112,6 +99,9 @@ final class OfficialNewsParser {
 
     private static String findPublishedLabel(String html, int fromIndex) {
         int toIndex = Math.min(html.length(), fromIndex + DATE_SCAN_LENGTH);
+        Matcher nextPost = POST_LINK.matcher(html);
+        nextPost.region(fromIndex, toIndex);
+        if (nextPost.find()) toIndex = nextPost.start();
         Matcher dateMatcher = UKRAINIAN_DATE.matcher(textContent(html.substring(fromIndex, toIndex)));
         return dateMatcher.find() ? dateMatcher.group() : null;
     }

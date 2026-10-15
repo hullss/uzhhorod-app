@@ -36,9 +36,10 @@ public class TransportVehiclePositionService {
     private final String sourceUrl;
     private final String sourceReferer;
     private final Duration cacheDuration;
-    private volatile Snapshot snapshot;
+    private final Map<String, Snapshot> snapshots = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile boolean sourceSessionInitialized;
     private volatile String sourceSessionCookie;
+    private volatile Instant sourceSessionCheckedAt;
 
     public TransportVehiclePositionService(
             RestClient.Builder restClientBuilder,
@@ -63,12 +64,13 @@ public class TransportVehiclePositionService {
     }
 
     private Snapshot currentSnapshot(String requestedRoute) {
-        Snapshot cached = snapshot;
+        String key = requestedRoute.toLowerCase(java.util.Locale.ROOT);
+        Snapshot cached = snapshots.get(key);
         if (isFresh(cached, requestedRoute)) {
             return cached;
         }
         synchronized (this) {
-            cached = snapshot;
+            cached = snapshots.get(key);
             if (isFresh(cached, requestedRoute)) {
                 return cached;
             }
@@ -93,7 +95,11 @@ public class TransportVehiclePositionService {
                             requestedRoute, dozorRouteId, vehicleSource.path("data").size());
                 }
                 Snapshot fresh = new Snapshot(requestedRoute, true, false, fetchedAt, vehicles);
-                snapshot = fresh;
+                if (snapshots.size() >= 32 && !snapshots.containsKey(key)) {
+                    snapshots.entrySet().stream().min(java.util.Comparator.comparing(entry -> entry.getValue().fetchedAt()))
+                            .ifPresent(entry -> snapshots.remove(entry.getKey()));
+                }
+                snapshots.put(key, fresh);
                 return fresh;
             } catch (RuntimeException error) {
                 log.warn("Official DozoR vehicle feed is unavailable: {}", error.toString());
@@ -136,13 +142,14 @@ public class TransportVehiclePositionService {
      * city's routes or no positions at all.
      */
     private String getSourceSessionCookie() {
-        if (sourceSessionInitialized) {
+        if (sessionStillValid()) {
             return sourceSessionCookie;
         }
         synchronized (this) {
-            if (sourceSessionInitialized) {
+            if (sessionStillValid()) {
                 return sourceSessionCookie;
             }
+            sourceSessionCheckedAt = Instant.now();
             try {
                 ResponseEntity<Void> response = restClient.get()
                         .uri(sourceReferer)
@@ -153,13 +160,19 @@ public class TransportVehiclePositionService {
                         .map(TransportVehiclePositionService::cookieValue)
                         .toList();
                 sourceSessionCookie = cookies.isEmpty() ? null : String.join("; ", cookies);
+                sourceSessionInitialized = true;
             } catch (RuntimeException error) {
                 log.warn("Could not initialize the DozoR Uzhhorod session: {}", error.toString());
-            } finally {
-                sourceSessionInitialized = true;
+                sourceSessionInitialized = false;
+                sourceSessionCookie = null;
             }
             return sourceSessionCookie;
         }
+    }
+
+    private boolean sessionStillValid() {
+        return sourceSessionCheckedAt != null && sourceSessionCheckedAt
+                .plus(sourceSessionInitialized ? Duration.ofMinutes(30) : Duration.ofSeconds(30)).isAfter(Instant.now());
     }
 
     private static String cookieValue(String setCookieHeader) {
@@ -225,7 +238,9 @@ public class TransportVehiclePositionService {
                         : null;
                 // Deliberately do not expose gNb, device identifiers, or other tracker metadata.
                 vehicles.add(new TransportVehiclePositionResponse(
-                        id, routeNumber, latitude, longitude, speed, heading, fetchedAt));
+                        // The feed adapter has no verified measurement timestamp. Response time
+                        // belongs to snapshot.fetchedAt and must not masquerade as a GPS fix.
+                        id, routeNumber, latitude, longitude, speed, heading, null));
             }
         }
         return List.copyOf(vehicles);

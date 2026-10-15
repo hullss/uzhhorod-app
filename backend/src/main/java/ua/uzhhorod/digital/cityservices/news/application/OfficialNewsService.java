@@ -36,7 +36,7 @@ public class OfficialNewsService {
         return new OfficialNewsListResponse(current.fetchedAt(), current.stale(), current.items());
     }
 
-    public OfficialNewsArticleResponse getArticlePreview(String articleUrl, String publishedLabel) {
+    public OfficialNewsArticleResponse getArticle(String articleUrl, String publishedLabel) {
         URI articleUri = validateArticleUri(articleUrl);
         try {
             String articleHtml = restClient.get()
@@ -54,10 +54,11 @@ public class OfficialNewsService {
     private URI validateArticleUri(String articleUrl) {
         try {
             URI sourceUri = URI.create(sourceUrl);
-            URI articleUri = URI.create(articleUrl);
+            URI articleUri = URI.create(articleUrl).normalize();
             String articlePath = articleUri.getPath();
             if (!"https".equalsIgnoreCase(articleUri.getScheme())
                     || !sourceUri.getHost().equalsIgnoreCase(articleUri.getHost())
+                    || articleUri.getUserInfo() != null
                     || (articleUri.getPort() != -1 && articleUri.getPort() != sourceUri.getPort())
                     || articlePath == null
                     || !articlePath.startsWith("/post/")) {

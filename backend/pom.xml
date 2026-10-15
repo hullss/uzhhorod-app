@@ -71,6 +71,21 @@
 
     <build>
         <plugins>
+            <!-- Keep applied PostgreSQL migration checksums unchanged. H2 needs a syntactic test copy of V9. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions><execution><id>h2-test-migrations</id><phase>generate-test-resources</phase><goals><goal>run</goal></goals>
+                    <configuration><target>
+                        <copy todir="${project.build.testOutputDirectory}/db/h2-migration" overwrite="true">
+                            <fileset dir="${project.basedir}/src/main/resources/db/migration" includes="*.sql" />
+                        </copy>
+                        <replace file="${project.build.testOutputDirectory}/db/h2-migration/V9__add_account_favorites.sql"
+                            token="default ''," value="default '';${line.separator}alter table user_accounts" />
+                    </target></configuration>
+                </execution></executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

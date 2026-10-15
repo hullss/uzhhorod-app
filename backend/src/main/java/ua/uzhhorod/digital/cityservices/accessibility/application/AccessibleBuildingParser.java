@@ -19,10 +19,19 @@ final class AccessibleBuildingParser {
                 : entityName + " — " + buildingName;
 
         return new AccessibleBuildingResponse(
-                value(record, "buildingId"),
+                identifier(record, name),
                 name.isBlank() ? "Будівля без назви" : name,
                 address(record),
                 parseDate(value(record, "date")));
+    }
+
+    private static String identifier(JsonNode record, String name) {
+        String id = value(record, "buildingId");
+        if (!id.isBlank()) return id;
+        String rowId = value(record, "_id");
+        if (!rowId.isBlank()) return "ckan-" + rowId;
+        String identity = name + "\n" + address(record) + "\n" + value(record, "date");
+        return "building-" + java.util.UUID.nameUUIDFromBytes(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private static String address(JsonNode record) {

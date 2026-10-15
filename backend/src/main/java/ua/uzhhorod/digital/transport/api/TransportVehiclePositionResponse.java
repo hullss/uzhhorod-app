@@ -10,5 +10,5 @@ public record TransportVehiclePositionResponse(
         double longitude,
         Integer speedKph,
         Integer headingDegrees,
-        Instant measuredAt) {
+        Instant measuredAt) { // Nullable: never infer a measurement time from the HTTP request time.
 }

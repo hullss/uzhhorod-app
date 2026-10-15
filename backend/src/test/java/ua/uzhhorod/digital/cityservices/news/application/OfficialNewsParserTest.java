@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import ua.uzhhorod.digital.cityservices.news.api.OfficialNewsItemResponse;
+import ua.uzhhorod.digital.cityservices.news.api.OfficialNewsArticleResponse;
 
 class OfficialNewsParserTest {
 
@@ -50,7 +51,7 @@ class OfficialNewsParserTest {
     }
 
     @Test
-    void extractsAShortAttributedPreviewWithoutCopyingTheWholeArticle() {
+    void keepsThePreviewCompatibleWithOlderClients() {
         var article = OfficialNewsParser.parseArticle("""
                 <html>
                   <head><meta property="og:description" content="Короткий офіційний опис події."></head>
@@ -62,5 +63,82 @@ class OfficialNewsParserTest {
         assertThat(article.preview()).isEqualTo("Короткий офіційний опис події.");
         assertThat(article.sourceUrl()).isEqualTo("https://rada-uzhgorod.gov.ua/post/novyna");
         assertThat(article.publishedLabel()).isEqualTo("вересня 28, 2026");
+        assertThat(article.fullTextAvailable()).isFalse();
+    }
+
+    @Test
+    void readsTheEntireCmsBodyBeyond720CharactersAndKeepsNestedContent() {
+        String longText = "Повний текст новини. ".repeat(90);
+        var article = OfficialNewsParser.parseArticle("""
+                <p>Навігація, не стаття</p><article class="post-content"><h1>Новина</h1>
+                <p class="post-listing-item-date">Опубліковано: жовтня 08, 2026</p>
+                <div class="post-item-inner-content other-class"><p>%s</p>
+                <div><h2>Подробиці</h2><p>Вкладений абзац</p></div><p>Останній абзац</p></div>
+                </article><footer><p>Контакти сайту</p></footer>
+                """.formatted(longText), "https://rada-uzhgorod.gov.ua/post/news", null);
+        assertThat(article.fullTextAvailable()).isTrue();
+        assertThat(article.blocks()).extracting(OfficialNewsArticleResponse.Block::text)
+                .containsExactly(longText.trim(), "Подробиці", "Вкладений абзац", "Останній абзац");
+        assertThat(article.blocks().get(1).type()).isEqualTo("heading");
+        assertThat(article.preview().length()).isLessThanOrEqualTo(721);
+        assertThat(article.publishedLabel()).isEqualTo("жовтня 08, 2026");
+    }
+
+    @Test
+    void keepsListsLineBreaksEntitiesAndOnlySafeLinks() {
+        var article = OfficialNewsParser.parseArticle("""
+                <article><h1>Новина</h1><img src="/media/photo.jpg">
+                <div class='post-item-inner-content'>
+                <p>Місто &amp; громада: &#x423;&#1078;город<br>Другий рядок</p>
+                <ol><li><p>Перший пункт</p></li><li>Другий пункт</li></ol>
+                <ul><li>Ще один пункт</li></ul>
+                <p><a href='/media/document.pdf'>Документ</a></p>
+                <p><a href='javascript:alert(1)'>Не виконувати</a></p>
+                <script>Небезпечний код</script><style>Прихований стиль</style>
+                <aside><p>Рекомендовані матеріали</p></aside>
+                </div></article>
+                """, "https://rada-uzhgorod.gov.ua/post/news", null);
+        assertThat(article.blocks()).extracting(OfficialNewsArticleResponse.Block::text)
+                .containsExactly("Місто & громада: Ужгород\nДругий рядок", "1. Перший пункт", "2. Другий пункт",
+                        "• Ще один пункт", "Документ", "Не виконувати");
+        assertThat(article.links()).containsExactly(new OfficialNewsArticleResponse.Link(
+                "Документ", "https://rada-uzhgorod.gov.ua/media/document.pdf"));
+        assertThat(article.imageUrl()).isEqualTo("https://rada-uzhgorod.gov.ua/media/photo.jpg");
+    }
+
+    @Test
+    void doesNotPretendMenusOrBrokenContainersAreAFullArticle() {
+        for (String html : List.of("<p>Меню</p><footer><p>Контакти</p></footer>",
+                "<article><h1>Заголовок</h1><div class='post-item-inner-content'><p>Неповна сторінка</p></article>")) {
+            var article = OfficialNewsParser.parseArticle(html, "https://rada-uzhgorod.gov.ua/post/news", null);
+            assertThat(article.fullTextAvailable()).isFalse();
+            assertThat(article.blocks()).isEmpty();
+            assertThat(article.preview()).isEmpty();
+        }
+    }
+
+    @Test
+    void doesNotAcceptTrackingOrExecutableImageUrls() {
+        for (String url : List.of("https://another.example/photo.jpg", "javascript:alert(1)",
+                "https://user:password@rada-uzhgorod.gov.ua/photo.jpg")) {
+            var article = OfficialNewsParser.parseArticle("<article><img src='" + url
+                    + "'><div class='post-item-inner-content'><p>Новина</p></div></article>",
+                    "https://rada-uzhgorod.gov.ua/post/news", null);
+            assertThat(article.imageUrl()).isNull();
+        }
+    }
+
+    @Test
+    void readsTheVerifiedCouncilMarkupWithAllFiveParagraphs() throws Exception {
+        try (var fixture = getClass().getResourceAsStream("/news/council-article.html")) {
+            assertThat(fixture).isNotNull();
+            String html = new String(fixture.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            var article = OfficialNewsParser.parseArticle(html, "https://rada-uzhgorod.gov.ua/post/v-uzhhorodi-16", null);
+            assertThat(article.fullTextAvailable()).isTrue();
+            assertThat(article.blocks()).hasSize(5);
+            assertThat(article.blocks().getFirst().text()).contains("об’єднає");
+            assertThat(article.blocks().getLast().text()).endsWith("«ПАДІЮН».");
+            assertThat(article.blocks().stream().mapToInt(block -> block.text().length()).sum()).isGreaterThan(720);
+        }
     }
 }

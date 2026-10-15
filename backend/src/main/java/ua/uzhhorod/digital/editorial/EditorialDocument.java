@@ -26,6 +26,7 @@ class EditorialDocument {
     }
 
     String getContent() { return content; }
+    String key() { return documentKey; }
     Instant getUpdatedAt() { return updatedAt; }
     void update(String nextContent) { content = nextContent; updatedAt = Instant.now(); }
 }

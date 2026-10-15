@@ -8,7 +8,16 @@
     "userInterfaceStyle": "automatic",
     "plugins": [
       "expo-status-bar",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Дозвольте Ужгород Цифровий використовувати камеру для зчитування QR-коду автобуса.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "expo-asset"
     ]
   }
 }

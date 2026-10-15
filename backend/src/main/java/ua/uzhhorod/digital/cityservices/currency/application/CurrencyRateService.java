@@ -65,6 +65,7 @@ public class CurrencyRateService {
                         .filter(rate -> rate.path("currencyCodeB").asInt() == UAH)
                         .filter(rate -> SUPPORTED_CURRENCIES.containsKey(rate.path("currencyCodeA").asInt()))
                         .map(this::toResponse)
+                        .filter(rate -> rate.buy() != null && rate.sell() != null && rate.buy().signum() > 0 && rate.sell().signum() > 0)
                         .sorted(Comparator.comparingInt(rate -> currencyOrder(rate.code())))
                         .toList();
                 if (rates.isEmpty()) {
@@ -90,7 +91,7 @@ public class CurrencyRateService {
                 SUPPORTED_CURRENCIES.get(rate.path("currencyCodeA").asInt()),
                 buy != null ? buy : crossRate,
                 sell != null ? sell : crossRate,
-                Instant.ofEpochSecond(rate.path("date").asLong()));
+                Instant.ofEpochSecond(rate.path("date").asLong()), sell == null);
     }
 
     private BigDecimal decimalValue(JsonNode node, String fieldName) {

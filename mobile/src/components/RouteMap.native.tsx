@@ -1,5 +1,8 @@
+import { Text } from "../i18n/ui";
+import { translate } from "../i18n/locale";
 import MapView, { Marker, Polyline } from "react-native-maps";
-import { Image, StyleSheet, Text, useColorScheme, useWindowDimensions, View } from "react-native";
+import { Image, StyleSheet, useWindowDimensions, View } from "react-native";
+import { useAppTheme } from "../ui/theme";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TransportRouteMap, TransportStop, TransportVehiclePosition } from "../api/transport";
 
@@ -64,7 +67,7 @@ export function RouteMap({
   vehicles = [],
   onStopPress,
 }: Props) {
-  const isDarkTheme = useColorScheme() === "dark";
+  const isDarkTheme = useAppTheme();
   const mapColors = isDarkTheme ? DARK_MAP_COLORS : LIGHT_MAP_COLORS;
   const mapRef = useRef<MapView>(null);
   const { width, height } = useWindowDimensions();
@@ -72,10 +75,13 @@ export function RouteMap({
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const vehicleClusters = useMemo(() => clusterVehicles(vehicles, mapRegion, width, height), [vehicles, mapRegion, width, height]);
   const hasFittedLiveVehicles = useRef(false);
+  const userMovedMap = useRef(false);
   const activeVariants = activeVariantId
     ? map.variants.filter((variant) => variant.id === activeVariantId)
     : map.variants;
   const visibleStops = stops ?? map.stops;
+  // A circular itinerary repeats its terminus; its geographic marker is still one place.
+  const markerStops = [...new Map(visibleStops.filter(stop => Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)).map(stop => [stop.id, stop])).values()];
   const routePoints = [...visibleStops, ...activeVariants.flatMap((variant) => variant.shape), ...(!preview ? vehicles : [])]
     .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
 
@@ -91,10 +97,17 @@ export function RouteMap({
     });
   }
 
+  useEffect(() => {
+    hasFittedLiveVehicles.current = false;
+    userMovedMap.current = false;
+    setSelectedVehicleId(null);
+    fitToRoute();
+  }, [map.routeId, activeVariantId]);
+
   // GPS positions arrive after the map itself is ready. Fit once so live buses do not end up
   // outside the initially visible fragment of the planned route; do not refit every 20 seconds.
   useEffect(() => {
-    if (preview || vehicles.length === 0 || hasFittedLiveVehicles.current || routePoints.length < 2) {
+    if (preview || userMovedMap.current || vehicles.length === 0 || hasFittedLiveVehicles.current || routePoints.length < 2) {
       return;
     }
     mapRef.current?.fitToCoordinates(routePoints, {
@@ -108,16 +121,19 @@ export function RouteMap({
     <MapView
       ref={mapRef}
       style={styles.map}
+      userInterfaceStyle={isDarkTheme ? "dark" : "light"}
       initialRegion={region}
       onMapReady={fitToRoute}
       onRegionChangeComplete={setMapRegion}
+      onTouchStart={() => { userMovedMap.current = true; }}
+      onPanDrag={() => { userMovedMap.current = true; }}
       scrollEnabled
       zoomEnabled
       rotateEnabled={false}
       pitchEnabled={false}
       showsPointsOfInterests={false}
       onMarkerPress={(event) => {
-        const stop = visibleStops.find((candidate) => candidate.id === event.nativeEvent.id);
+        const stop = markerStops.find((candidate) => `stop-${candidate.id}` === event.nativeEvent.id);
         if (stop) {
           onStopPress?.(stop);
         }
@@ -137,10 +153,10 @@ export function RouteMap({
         strokeWidth={preview ? 4 : 5}
         zIndex={2}
       /> : null)}
-      {!preview && visibleStops.filter((stop) => Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)).map((stop) => (
+      {!preview && markerStops.map((stop) => (
         <Marker
-          key={stop.id}
-          identifier={stop.id}
+          key={`stop-${stop.id}`}
+          identifier={`stop-${stop.id}`}
           coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
           title={stop.name}
           description="Натисніть, щоб переглянути плановий час"
@@ -159,10 +175,10 @@ export function RouteMap({
         const small = mapRegion.latitudeDelta > 0.035 && !selected;
         return (
         <Marker
-          key={cluster.id}
-          identifier={cluster.id}
+          key={`vehicle-${cluster.id}`}
+          identifier={`vehicle-${cluster.id}`}
           coordinate={{ latitude: cluster.latitude, longitude: cluster.longitude }}
-          title={cluster.vehicles.length > 1 ? `${cluster.vehicles.length} автобуси поруч` : `Автобус ${vehicle.routeNumber}`}
+          title={translate(cluster.vehicles.length > 1 ? `${cluster.vehicles.length} автобуси поруч` : `Автобус ${vehicle.routeNumber}`)}
           description={cluster.vehicles.length > 1 ? "Натисніть, щоб наблизити" : `Маршрут ${vehicle.routeNumber} · онлайн GPS`}
           anchor={{ x: 0.5, y: 0.5 }}
           tracksViewChanges

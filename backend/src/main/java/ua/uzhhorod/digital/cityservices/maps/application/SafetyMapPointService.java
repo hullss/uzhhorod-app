@@ -19,6 +19,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 import ua.uzhhorod.digital.cityservices.maps.api.SafetyMapPointResponse;
 import ua.uzhhorod.digital.cityservices.maps.api.SafetyMapPointsResponse;
+import ua.uzhhorod.digital.editorial.EditorialSafetyMapStore;
 
 /**
  * Keeps coordinate data separate from tiles: map tiles are only a picture, while
@@ -35,25 +36,32 @@ public class SafetyMapPointService {
     private final String sheltersSourceUrl;
     private final Duration cacheDuration;
     private final ManualMapPoints manualPoints;
+    private final EditorialSafetyMapStore editorialPoints;
     private volatile Snapshot sheltersSnapshot;
 
     public SafetyMapPointService(
             RestClient.Builder restClientBuilder,
             ObjectMapper objectMapper,
+            EditorialSafetyMapStore editorialPoints,
             @Value("${city-services.maps.shelters-geojson-url}") String sheltersSourceUrl,
             @Value("${city-services.maps.shelters-cache-duration:PT30M}") Duration cacheDuration) {
         this.restClient = restClientBuilder.build();
+        this.editorialPoints = editorialPoints;
         this.sheltersSourceUrl = sheltersSourceUrl;
         this.cacheDuration = cacheDuration;
         this.manualPoints = readManualPoints(objectMapper);
     }
 
     public SafetyMapPointsResponse getShelters() {
+        var published = editorialPoints.read("shelters");
+        if (published.isPresent()) return published.get();
         Snapshot snapshot = currentShelterSnapshot();
         return new SafetyMapPointsResponse(snapshot.fetchedAt(), snapshot.stale(), snapshot.points());
     }
 
     public SafetyMapPointsResponse getResiliencePoints() {
+        var published = editorialPoints.read("resilience");
+        if (published.isPresent()) return published.get();
         List<SafetyMapPointResponse> points = toResponses(manualPoints.resiliencePoints(), "resilience");
         return new SafetyMapPointsResponse(manualPoints.lastUpdatedAt(), true, points);
     }

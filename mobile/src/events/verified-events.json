@@ -1,0 +1,108 @@
+{
+  "items": [
+    {
+      "id": "philharmonic-80",
+      "title": "Філармонії — 80",
+      "date": "2026-10-01",
+      "time": "18:30",
+      "category": "Концерти",
+      "venue": "Закарпатська обласна філармонія",
+      "address": "Ужгород, пл. Театральна, 10",
+      "description": "Ювілейний концерт до 80-річчя Закарпатської обласної філармонії.",
+      "organizer": "КЗ Закарпатська обласна філармонія",
+      "sourceUrl": "https://concert.ua/uk/event/filarmoniyi-80-velikii-yuvileinii-koncert",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "klavdia",
+      "title": "Klavdia Petrivna Show",
+      "date": "2026-10-03",
+      "time": "18:00",
+      "category": "Концерти",
+      "venue": "Закарпатський драмтеатр",
+      "address": "Ужгород, вул. Івана Чендея, 12",
+      "description": "Шоу осіннього туру Klavdia Petrivna: живе звучання, сценічне світло та знайомі пісні в театральному просторі.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/klavdia-petrivna",
+      "posterUrl": "https://internet-bilet.ua/images/events_header/big/eh_1787329142_6a887a76295de.jpg",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "zukhvala",
+      "title": "Настя Зухвала. Необовʼязкова ганьба",
+      "date": "2026-10-04",
+      "time": "18:00",
+      "category": "Інше",
+      "venue": "Belfast pub 2.0",
+      "address": "Ужгород, вул. Волошина, 26",
+      "description": "Сольний стендап про дорослішання, повсякденні незручності й можливість посміятися із себе. Вікове обмеження: 16+.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/nastya-zuhvala",
+      "posterUrl": "https://internet-bilet.ua/images/events_header/big/eh_1789483581_6aa95a3da4347.jpg",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "zimmer",
+      "title": "Музика Ганса Циммера при свічках",
+      "date": "2026-10-05",
+      "time": "19:00",
+      "category": "Концерти",
+      "venue": "Закарпатська обласна філармонія",
+      "address": "Ужгород, пл. Театральна, 10",
+      "description": "Концерт музики композитора Ганса Циммера в камерній атмосфері при свічках. Це виконання його творів, а не особистий виступ композитора.",
+      "organizer": "ФОП Андрій Лоїк Павлович",
+      "sourceUrl": "https://concert.ua/uk/event/muzika-cimmera-uzhhorod",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "misto",
+      "title": "Пластична вистава «Місто»",
+      "date": "2026-10-17",
+      "time": "19:00",
+      "category": "Театр",
+      "venue": "Закарпатський драмтеатр",
+      "address": "Ужгород, вул. Івана Чендея, 12",
+      "description": "Сценічне переосмислення роману Валерʼяна Підмогильного. Історія Степана Радченка, який шукає своє місце у великому місті, розказана мовою пластики. У виставі — Григорій Бакланов; режисер — Ігор Білиць. Вікове обмеження: 16+.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/misto",
+      "posterUrl": "https://uzhgorod.internet-bilet.ua/images/events_header/big/eh_1784730564_6a60d3c4979b0.jpg",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "homin",
+      "title": "Хор «Гомін»",
+      "date": "2026-10-18",
+      "time": "19:00",
+      "category": "Концерти",
+      "venue": "Закарпатський драмтеатр",
+      "address": "Ужгород, вул. Івана Чендея, 12",
+      "description": "Хор Львівського органного залу з програмою «Цей хор, цей хор мені щоночі сниться» 2.0. Українські ретро-пісні в новому хоровому звучанні.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/hor-gomin",
+      "posterUrl": "https://internet-bilet.ua/images/events_header/big/eh_1785932137_6a732969cbb55.jpg",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "einaudi",
+      "title": "Музика при свічках: Ейнауді та Тірсен",
+      "date": "2026-10-22",
+      "time": "19:00",
+      "category": "Концерти",
+      "venue": "Закарпатська обласна філармонія",
+      "address": "Ужгород, пл. Театральна, 10",
+      "description": "Вечір композицій Людовіко Ейнауді та Яна Тірсена при свічках. У програмі — їхня музика; особисту участь композиторів не заявлено.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/muzyka-pry-svichkakh",
+      "posterUrl": "https://internet-bilet.ua/images/events_header/big/eh_1783937024_6a54b800e061c.jpg",
+      "verifiedAt": "2026-10-08"
+    },
+    {
+      "id": "queen",
+      "title": "Queen при свічках",
+      "date": "2026-10-29",
+      "time": "19:00",
+      "category": "Концерти",
+      "venue": "Закарпатська обласна філармонія",
+      "address": "Ужгород, пл. Театральна, 10",
+      "description": "Хіти Queen у виконанні квартету BIGSHOW ORCHESTRA. Камерний концерт при свічках — не виступ самого гурту Queen.",
+      "sourceUrl": "https://uzhgorod.internet-bilet.ua/uk/queen",
+      "posterUrl": "https://internet-bilet.ua/images/events_header/big/eh_1784809304_6a62075802051.jpg",
+      "verifiedAt": "2026-10-08"
+    }
+  ]
+}

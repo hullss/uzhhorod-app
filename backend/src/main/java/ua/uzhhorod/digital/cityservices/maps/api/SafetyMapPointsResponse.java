@@ -6,5 +6,9 @@ import java.util.List;
 public record SafetyMapPointsResponse(
         Instant fetchedAt,
         boolean stale,
-        List<SafetyMapPointResponse> points) {
+        List<SafetyMapPointResponse> points,
+        String source) {
+    public SafetyMapPointsResponse(Instant fetchedAt, boolean stale, List<SafetyMapPointResponse> points) {
+        this(fetchedAt, stale, points, "source");
+    }
 }

@@ -1,4 +1,6 @@
 spring:
+  flyway:
+    locations: classpath:db/h2-migration
   datasource:
     url: jdbc:h2:mem:uzhhorod_digital;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa
@@ -8,4 +10,31 @@ spring:
       ddl-auto: validate
 
 transport:
+  import-token: ""
   gtfs-feed-url: https://example.invalid/feed.zip
+  gtfs-import-cron: "-"
+  realtime-source-url: https://example.invalid/data
+  realtime-source-referer: https://example.invalid/city
+
+# Explicit inert providers: tests must not inherit secrets or call production services.
+city-services:
+  accessibility:
+    datastore-url: https://example.invalid/accessibility
+  open-data:
+    catalog-api-url: https://example.invalid/catalog
+    catalog-url: https://example.invalid
+  currency:
+    monobank-url: https://example.invalid/currency
+  weather:
+    api-url: https://example.invalid/weather
+    api-key: ""
+    cache-duration: PT15M
+    latitude: 48.6208
+    longitude: 22.2879
+  alerts:
+    api-url: https://example.invalid/alerts
+    api-token: ""
+  news:
+    source-url: https://example.invalid
+  maps:
+    shelters-geojson-url: https://example.invalid/shelters

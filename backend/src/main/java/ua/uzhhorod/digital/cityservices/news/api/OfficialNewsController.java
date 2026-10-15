@@ -23,9 +23,9 @@ public class OfficialNewsController {
     }
 
     @GetMapping("/article")
-    public OfficialNewsArticleResponse getArticlePreview(
+    public OfficialNewsArticleResponse getArticle(
             @RequestParam String url,
             @RequestParam(required = false) String publishedLabel) {
-        return officialNewsService.getArticlePreview(url, publishedLabel);
+        return officialNewsService.getArticle(url, publishedLabel);
     }
 }

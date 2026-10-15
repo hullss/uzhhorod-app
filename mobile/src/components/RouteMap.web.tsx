@@ -1,5 +1,8 @@
-import { createElement, useEffect, useMemo } from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { createElement, useEffect, useMemo, useRef } from "react";
+import { Asset } from "expo-asset";
+import { getLanguage, translate } from "../i18n/locale";
+import { StyleSheet, View } from "react-native";
+import { useAppTheme } from "../ui/theme";
 import type { TransportRouteMap, TransportStop, TransportVehiclePosition } from "../api/transport";
 
 export type MapRegion = {
@@ -28,6 +31,8 @@ type WebMapMessage = {
 const UZHHOROD_BUS_MARKER = require("../../assets/transport/uzhhorod-elektron-marker.png");
 
 export function RouteMap({ map, region, preview = false, activeVariantId, stops, selectedStopId, vehicles = [], onStopPress }: Props) {
+  const dark = useAppTheme(); const language = getLanguage();
+  const frame = useRef<HTMLIFrameElement>(null);
   const visibleStops = stops ?? map.stops;
   const activeVariants = activeVariantId
     ? map.variants.filter((variant) => variant.id === activeVariantId)
@@ -35,7 +40,7 @@ export function RouteMap({ map, region, preview = false, activeVariantId, stops,
 
   useEffect(() => {
     function handleMessage(event: MessageEvent<WebMapMessage>) {
-      if (event.data?.source !== "uzhhorod-route-map" || !event.data.stopId) {
+      if (event.source !== frame.current?.contentWindow || event.data?.source !== "uzhhorod-route-map" || !event.data.stopId) {
         return;
       }
       const stop = visibleStops.find((item) => item.id === event.data.stopId);
@@ -47,20 +52,29 @@ export function RouteMap({ map, region, preview = false, activeVariantId, stops,
     return () => window.removeEventListener("message", handleMessage);
   }, [onStopPress, visibleStops]);
 
+  const latest = useRef({ selectedStopId, vehicles, stops: visibleStops, shapes: activeVariants.map(v => v.shape) });
+  latest.current = { selectedStopId, vehicles: preview ? [] : vehicles, stops: visibleStops, shapes: activeVariants.map(v => v.shape) };
+  const update = () => frame.current?.contentWindow?.postMessage({ type: "uzhhorod-route-data", ...latest.current }, "*");
+  useEffect(update, [selectedStopId, vehicles, visibleStops, map]);
   const document = useMemo(() => createMapDocument({
     region,
     selectedStopId,
     shapes: activeVariants.map((variant) => variant.shape),
     stops: visibleStops,
     vehicles: preview ? [] : vehicles,
-    busMarkerUri: Image.resolveAssetSource(UZHHOROD_BUS_MARKER).uri,
-  }), [activeVariants, region, selectedStopId, vehicles, visibleStops]);
+    busMarkerUri: Asset.fromModule(UZHHOROD_BUS_MARKER).uri,
+    dark,
+  // Reload only for an actual route/direction/theme change. GPS and clock ticks use messages.
+  }), [map.routeId, activeVariantId, preview, dark, language]);
 
   return (
     <View style={styles.map}>
       {createElement("iframe", {
-        title: preview ? "Схема маршруту" : "Інтерактивна карта маршруту",
+        ref: frame,
+        title: translate(preview ? "Схема маршруту" : "Інтерактивна карта маршруту"),
         srcDoc: document,
+        sandbox: "allow-scripts",
+        onLoad: update,
         style: { ...iframeStyle, pointerEvents: preview ? "none" : "auto" },
       })}
     </View>
@@ -74,6 +88,7 @@ function createMapDocument({
   stops,
   vehicles,
   busMarkerUri,
+  dark,
 }: {
   region: MapRegion;
   selectedStopId?: string;
@@ -81,10 +96,11 @@ function createMapDocument({
   stops: TransportStop[];
   vehicles: TransportVehiclePosition[];
   busMarkerUri: string;
+  dark: boolean;
 }) {
-  const safeJson = JSON.stringify({ region, selectedStopId, shapes, stops, vehicles, busMarkerUri }).replace(/</g, "\\u003c");
+  const safeJson = JSON.stringify({ region, selectedStopId, shapes, stops, vehicles, busMarkerUri, busLabel: translate("Автобус"), clusterLabel: translate("автобуси поруч · натисніть, щоб наблизити") }).replace(/</g, "\\u003c");
   return `<!doctype html>
-<html lang="uk">
+<html lang="${getLanguage()}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -95,25 +111,37 @@ function createMapDocument({
     <div id="map"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-      const data = ${safeJson};
+      let data = ${safeJson};
       const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([data.region.latitude, data.region.longitude], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+      const base = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+      let tileErrors = 0;
+      base.on('tileerror', () => { if (++tileErrors < 3) return; if (map.hasLayer(base)) map.removeLayer(base); if (document.getElementById('tile-warning')) return; const warning = document.createElement('div'); warning.id = 'tile-warning'; warning.textContent = ${JSON.stringify(translate("Основа мапи недоступна. Позначки й список залишаються доступними."))}; warning.style.cssText = 'position:absolute;bottom:20px;left:12px;right:12px;z-index:800;background:white;color:#13213c;padding:10px;border-radius:8px;font:13px/18px system-ui;pointer-events:none'; document.body.appendChild(warning); });
       const bounds = [];
+      const routeLines = []; let shapeKey = ''; let initialBounds = true;
+      const drawShapes = () => {
+      const key = JSON.stringify(data.shapes); if(key === shapeKey) return; shapeKey = key;
+      routeLines.forEach(line=>line.remove()); routeLines.length=0;
       data.shapes.forEach((shape) => {
         const points = shape.filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude)).map((point) => [point.latitude, point.longitude]);
         if (points.length > 1) {
-          L.polyline(points, { color: '#071b2f', weight: 8, opacity: 0.96 }).addTo(map);
-          L.polyline(points, { color: '#123a63', weight: 5, opacity: 0.98 }).addTo(map);
-          bounds.push(...points);
+          routeLines.push(L.polyline(points, { color: '${dark ? "#071b2f" : "#ffffff"}', weight: 8, opacity: 0.96 }).addTo(map));
+          routeLines.push(L.polyline(points, { color: '${dark ? "#38bdf8" : "#123a63"}', weight: 5, opacity: 0.98 }).addTo(map));
+          if (initialBounds) bounds.push(...points);
         }
-      });
+      }); }; drawShapes();
+      const stopMarkers = []; let stopKey = '';
+      const drawStops = () => {
+      const key = JSON.stringify([data.stops,data.selectedStopId]); if(key===stopKey) return; stopKey=key;
+      stopMarkers.forEach(marker=>marker.remove()); stopMarkers.length=0;
       data.stops.filter((stop) => Number.isFinite(stop.latitude) && Number.isFinite(stop.longitude)).forEach((stop) => {
         const selected = stop.id === data.selectedStopId;
         const marker = L.circleMarker([stop.latitude, stop.longitude], { color: '#123a63', fillColor: selected ? '#e5ae2d' : '#ffffff', fillOpacity: 1, radius: selected ? 8 : 6, weight: selected ? 3 : 2 }).addTo(map);
-        marker.bindTooltip(stop.name, { direction: 'top', offset: [0, -7] });
+        const stopLabel = document.createElement('span'); stopLabel.textContent = stop.name;
+        marker.bindTooltip(stopLabel, { direction: 'top', offset: [0, -7] });
+        stopMarkers.push(marker);
         marker.on('click', () => window.parent.postMessage({ source: 'uzhhorod-route-map', stopId: stop.id }, '*'));
-        bounds.push([stop.latitude, stop.longitude]);
-      });
+        if (initialBounds) bounds.push([stop.latitude, stop.longitude]);
+      }); }; drawStops();
       const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
       const busMarkers = [];
       let selectedBusId = null;
@@ -136,7 +164,7 @@ function createMapDocument({
         clusters.forEach((cluster) => {
           const vehicle = cluster.vehicles[0];
           const marker = L.marker([vehicle.latitude, vehicle.longitude], { icon: busIcon(vehicle.routeNumber, cluster.vehicles.length, selectedBusId === vehicle.id, vehicle.headingDegrees), zIndexOffset: selectedBusId === vehicle.id ? 1100 : 1000 })
-            .bindTooltip(cluster.vehicles.length > 1 ? cluster.vehicles.length + ' автобуси поруч · натисніть, щоб наблизити' : 'Автобус ' + vehicle.routeNumber).addTo(map);
+            .bindTooltip((()=>{const label=document.createElement('span');label.textContent=cluster.vehicles.length > 1 ? cluster.vehicles.length + ' ' + data.clusterLabel : data.busLabel + ' ' + vehicle.routeNumber;return label;})()).addTo(map);
           marker.on('click', () => {
             if (cluster.vehicles.length > 1) map.setView([vehicle.latitude, vehicle.longitude], Math.min(map.getZoom() + 2, 18));
             else { selectedBusId = vehicle.id; renderBuses(); }
@@ -145,8 +173,16 @@ function createMapDocument({
         });
       };
       if (bounds.length > 1) map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 });
+      initialBounds = false; bounds.length = 0;
       renderBuses();
       map.on('zoomend moveend', renderBuses);
+      window.addEventListener('message', event => {
+        const next=event.data;
+        if(event.source!==parent || next?.type!=='uzhhorod-route-data' || !Array.isArray(next.vehicles) || !Array.isArray(next.stops) || !Array.isArray(next.shapes)) return;
+        data={...data,vehicles:next.vehicles,stops:next.stops,shapes:next.shapes,selectedStopId:next.selectedStopId};
+        drawShapes(); drawStops(); renderBuses();
+        // Deliberately no fitBounds/setView on updates: the user owns the viewport.
+      });
     </script>
   </body>
 </html>`;

@@ -1,6 +1,8 @@
 package ua.uzhhorod.digital.transport.application;
 
 import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,20 +65,22 @@ public class TransportRouteService {
         var route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new TransportRouteNotFoundException(routeId));
         var variants = routeVariantRepository.findAllByRouteIdOrderByDirectionIdAscNameAsc(routeId).stream()
-                .map(variant -> new TransportRouteVariantResponse(
-                        variant.getId(),
-                        variant.getDirectionId(),
-                        variant.getName(),
-                        routeVariantStopRepository.findAllByIdRouteVariantIdOrderByIdStopSequenceAsc(variant.getId()).stream()
-                                .map(routeVariantStop -> stopRepository.findById(routeVariantStop.getStopId())
-                                        .orElseThrow())
+                .map(variant -> {
+                    var sequence = routeVariantStopRepository.findAllByIdRouteVariantIdOrderByIdStopSequenceAsc(variant.getId());
+                    var stops = stopRepository.findAllById(sequence.stream().map(item -> item.getStopId()).distinct().toList())
+                            .stream().collect(Collectors.toMap(item -> item.getId(), Function.identity()));
+                    return new TransportRouteVariantResponse(
+                        variant.getId(), variant.getDirectionId(), variant.getName(),
+                        sequence.stream()
+                                .map(item -> java.util.Objects.requireNonNull(stops.get(item.getStopId()), "Missing route stop"))
                                 .map(stop -> new TransportStopResponse(
                                         stop.getId(),
                                         stop.getExternalId(),
                                         stop.getName(),
                                         stop.getLatitude(),
                                         stop.getLongitude()))
-                                .toList()))
+                                .toList());
+                })
                 .toList();
         return new TransportRouteDetailsResponse(
                 route.getId(),

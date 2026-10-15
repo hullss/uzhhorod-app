@@ -8,5 +8,8 @@ mobile/node_modules/
 mobile/.expo/
 mobile/.expo-web-check*/
 mobile/.expo-verify-*/
+mobile/.expo-map-check/
+tmp/presentation-build/
 mobile/dist/
+mobile/public/vendor/maplibre-gl-worker.mjs
 backend/.maven-wrapper-cache/

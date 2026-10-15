@@ -1,3 +1,7 @@
+import { requestJson } from "./request";
+import { decodeDepartures, decodeRoute, decodeRouteMap, decodeRoutes, decodeStops, decodeVehicles } from "./transportValidation";
+import { persistTransportSnapshot, readTransportSnapshot, snapshotPath } from "../storage/transportSnapshots";
+
 export type TransportRoute = {
   id: string;
   routeNumber: string;
@@ -75,63 +79,70 @@ export type TransportImportStatus = {
   importedRouteVariantCount: number | null;
 };
 
-const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
-const requestTimeoutMs = 8_000;
-
 async function request<T>(path: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-  try {
-    const response = await fetch(`${apiUrl}${path}`, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`Не вдалося завантажити дані: HTTP ${response.status}`);
-    }
-    return response.json() as Promise<T>;
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Сервер транспорту не відповів за 8 секунд. Перевірте, чи запущений бекенд.");
-    }
-    if (error instanceof TypeError) {
-      throw new Error("Не вдається з’єднатися з сервером транспорту. Перевірте бекенд і EXPO_PUBLIC_API_URL.");
-    }
+  return requestJson<T>(path, "Не вдалося завантажити транспортні дані. Спробуйте ще раз.");
+}
+// Reuse catalogues across screens; never cache live GPS positions here.
+const snapshots = new Map<string, { value: unknown; until: number }>();
+const inFlight = new Map<string, Promise<unknown>>();
+const snapshotInfo = new WeakMap<object, { savedAt: string; offline: boolean }>();
+export function getTransportSnapshotInfo(value: unknown): { savedAt: string; offline: boolean } | undefined {
+  return value && typeof value === "object" ? snapshotInfo.get(value) ?? (Array.isArray(value) ? value.map(item => getTransportSnapshotInfo(item)).find(info => info?.offline) : undefined) : undefined;
+}
+function markSnapshot(value: unknown, savedAt: string, offline: boolean) {
+  if (value && typeof value === "object") { snapshotInfo.set(value, { savedAt, offline }); if (Array.isArray(value)) value.forEach(item => markSnapshot(item, savedAt, offline)); }
+}
+function cached<T>(path: string, ttl = 5 * 60_000, decode: (value: unknown) => T = value => value as T): Promise<T> {
+  const entry = snapshots.get(path);
+  if (entry && entry.until > Date.now()) return Promise.resolve(entry.value as T);
+  const pending = inFlight.get(path); if (pending) return pending as Promise<T>;
+  const next = request<unknown>(path).then(decode).then(value => {
+    if (snapshots.size >= 256) snapshots.delete(snapshots.keys().next().value!);
+    snapshots.set(path, { value, until: Date.now() + ttl });
+    markSnapshot(value, new Date().toISOString(), false);
+    void persistTransportSnapshot(path, value).catch(() => undefined);
+    return value;
+  }).catch(async error => {
+    if (!snapshotPath(path) || error?.status === 401 || error?.status === 403 || error?.status === 404) throw error;
+    try {
+      const stored = await readTransportSnapshot(path);
+      if (stored) { const value = decode(stored.value); markSnapshot(value, stored.savedAt, true); snapshots.set(path, { value, until: Date.now() + 15_000 }); return value; }
+    } catch { /* An unreadable snapshot never turns into an empty/fresh catalogue. */ }
     throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  }).finally(() => inFlight.delete(path));
+  inFlight.set(path, next); return next;
 }
 
 export function getRoutes(query?: string): Promise<TransportRoute[]> {
   const normalizedQuery = query?.trim();
-  const path = normalizedQuery
-    ? `/api/transport/routes?query=${encodeURIComponent(normalizedQuery)}`
-    : "/api/transport/routes";
-  return request(path);
+  return cached("/api/transport/routes", undefined, decodeRoutes).then(items => normalizedQuery
+    ? items.filter(item => `${item.routeNumber} ${item.name}`.toLocaleLowerCase("uk").includes(normalizedQuery.toLocaleLowerCase("uk"))) : items);
 }
 
 export function getStops(query?: string): Promise<TransportStop[]> {
   const normalizedQuery = query?.trim();
-  const path = normalizedQuery
-    ? `/api/transport/stops?query=${encodeURIComponent(normalizedQuery)}`
-    : "/api/transport/stops";
-  return request(path);
+  return cached("/api/transport/stops", undefined, decodeStops).then(items => normalizedQuery
+    ? items.filter(item => item.name.toLocaleLowerCase("uk").includes(normalizedQuery.toLocaleLowerCase("uk"))) : items);
 }
 
 export function getStopRoutes(stopId: string): Promise<TransportRoute[]> {
-  return request(`/api/transport/stops/${stopId}/routes`);
+  return cached(`/api/transport/stops/${encodeURIComponent(stopId)}/routes`, undefined, decodeRoutes);
 }
 
 export function getRoute(routeId: string): Promise<TransportRouteDetails> {
-  return request(`/api/transport/routes/${routeId}`);
+  return cached(`/api/transport/routes/${encodeURIComponent(routeId)}`, undefined, decodeRoute);
 }
 
 export function getDepartures(routeId: string, stopId: string, date: string): Promise<TransportDeparture[]> {
-  return request(
-    `/api/transport/routes/${routeId}/stops/${stopId}/departures?date=${encodeURIComponent(date)}`,
+  return cached(
+    `/api/transport/routes/${encodeURIComponent(routeId)}/stops/${encodeURIComponent(stopId)}/departures?date=${encodeURIComponent(date)}`,
+    60_000,
+    decodeDepartures,
   );
 }
 
 export function getRouteMap(routeId: string): Promise<TransportRouteMap> {
-  return request(`/api/transport/routes/${routeId}/map`);
+  return cached(`/api/transport/routes/${encodeURIComponent(routeId)}/map`, undefined, decodeRouteMap);
 }
 
 export function getVehiclePositions(routeNumber?: string): Promise<TransportVehiclePositions> {
@@ -139,9 +150,9 @@ export function getVehiclePositions(routeNumber?: string): Promise<TransportVehi
   const path = query
     ? `/api/transport/vehicles?routeNumber=${encodeURIComponent(query)}`
     : "/api/transport/vehicles";
-  return request(path);
+  return request(path).then(decodeVehicles);
 }
 
 export function getLatestTransportImport(): Promise<TransportImportStatus> {
-  return request("/api/transport/imports/latest");
+  return cached("/api/transport/imports/latest");
 }

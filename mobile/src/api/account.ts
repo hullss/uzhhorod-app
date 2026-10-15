@@ -1,3 +1,5 @@
+import { ApiError, requestJson } from "./request";
+
 export type AccountSession = {
   accessToken: string;
   preferences: {
@@ -14,29 +16,50 @@ export type AccountSession = {
   };
 };
 
-const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080";
+const accountDataError = () => new ApiError("Сервіс повернув некоректні дані. Спробуйте оновити сторінку.");
+function decodePreferences(value: unknown): AccountSession["preferences"] {
+  if (!value || typeof value !== "object") throw accountDataError();
+  const v = value as AccountSession["preferences"];
+  if (typeof v.email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email) || !["uk", "en"].includes(v.language) || [v.alert, v.news, v.transport, v.silence].some(item => typeof item !== "boolean")) throw accountDataError();
+  return { email: v.email, language: v.language, alert: v.alert, news: v.news, transport: v.transport, silence: v.silence };
+}
+function decodeFavorites(value: unknown): AccountSession["favorites"] {
+  if (!value || typeof value !== "object") throw accountDataError();
+  const v = value as AccountSession["favorites"];
+  const ids = (items: unknown): string[] => {
+    if (!Array.isArray(items) || items.length > 500 || items.some(id => typeof id !== "string" || !id.trim() || id.length > 100)) throw accountDataError();
+    return [...new Set(items.map(id => id.trim()))];
+  };
+  return { routeIds: ids(v.routeIds), stopIds: ids(v.stopIds) };
+}
+export function decodeAccountSession(value: unknown): AccountSession {
+  if (!value || typeof value !== "object") throw accountDataError();
+  const v = value as AccountSession;
+  if (typeof v.accessToken !== "string" || !v.accessToken.trim() || v.accessToken.length > 4096) throw accountDataError();
+  return { accessToken: v.accessToken, preferences: decodePreferences(v.preferences), favorites: decodeFavorites(v.favorites) };
+}
 
 async function authenticate(path: "/register" | "/login", email: string, password: string): Promise<AccountSession> {
-  const response = await fetch(`${apiUrl}/api/account${path}`, {
+  return requestJson<AccountSession>(`/api/account${path}`, "Не вдалося виконати дію. Перевірте пошту та пароль.", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!response.ok) {
-    const message = response.status === 409
+    body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+    statusMessage: (status) => status === 409
       ? "Ця електронна пошта вже зареєстрована. Увійдіть у свій акаунт."
-      : response.status === 429
-        ? "Забагато спроб. Спробуйте ще раз через 15 хвилин."
-        : response.status === 404
-          ? "Сервіс акаунтів ще не оновлено на сервері. Спробуйте пізніше."
-          : response.status === 401
+      : status === 429
+        ? "Забагато спроб. Спробуйте ще раз пізніше."
+        : status === 404
+          ? "Сервіс акаунтів тимчасово недоступний. Спробуйте пізніше."
+          : status === 401
             ? "Пошта або пароль неправильні."
-            : response.status >= 500
+            : status >= 500
               ? "На сервері виникла помилка. Спробуйте пізніше."
-              : "Не вдалося виконати дію. Перевірте пошту та пароль.";
-    throw new Error(message);
-  }
-  return response.json() as Promise<AccountSession>;
+              : "Не вдалося виконати дію. Перевірте пошту та пароль.",
+  }).then(decodeAccountSession);
+}
+
+export function isExpiredAccountSession(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
 }
 
 export function registerAccount(email: string, password: string) {
@@ -49,60 +72,64 @@ export function loginAccount(email: string, password: string) {
 
 export async function refreshAccountSession(accessToken: string): Promise<AccountSession> {
   const headers = { "Authorization": `Bearer ${accessToken}` };
-  const [preferencesResponse, favoritesResponse] = await Promise.all([
-    fetch(`${apiUrl}/api/account/preferences`, { headers }),
-    fetch(`${apiUrl}/api/account/favorites`, { headers }),
+  const [preferencesResult, favoritesResult] = await Promise.allSettled([
+    requestJson<AccountSession["preferences"]>("/api/account/preferences", "Не вдалося оновити налаштування акаунта.", { headers }),
+    requestJson<AccountSession["favorites"]>("/api/account/favorites", "Не вдалося оновити обране.", { headers }),
   ]);
-  if (!preferencesResponse.ok || !favoritesResponse.ok) {
-    throw new Error("Сесія більше не дійсна.");
+  // Prefer an explicit 401 even if the other endpoint failed offline first.
+  for (const result of [preferencesResult, favoritesResult]) {
+    if (result.status === "rejected" && isExpiredAccountSession(result.reason)) throw result.reason;
   }
-  return {
-    accessToken,
-    preferences: await preferencesResponse.json() as AccountSession["preferences"],
-    favorites: await favoritesResponse.json() as AccountSession["favorites"],
-  };
+  if (preferencesResult.status === "rejected") throw preferencesResult.reason;
+  if (favoritesResult.status === "rejected") throw favoritesResult.reason;
+  return decodeAccountSession({ accessToken, preferences: preferencesResult.value, favorites: favoritesResult.value });
+}
+
+export async function recoverAccountSession(stored: AccountSession): Promise<AccountSession | null> {
+  try { return await refreshAccountSession(stored.accessToken); }
+  catch (error) {
+    // Network failures, 404, 429 and 5xx do not revoke the saved credentials.
+    if (isExpiredAccountSession(error)) return null;
+    return stored;
+  }
 }
 
 export async function logoutAccount(accessToken: string) {
-  const response = await fetch(`${apiUrl}/api/account/session`, {
+  try { await requestJson<void>("/api/account/session", "Не вдалося вийти з акаунта. Спробуйте ще раз.", {
     method: "DELETE",
     headers: { "Authorization": `Bearer ${accessToken}` },
-  });
-  if (!response.ok && response.status !== 401) {
-    throw new Error("Не вдалося вийти з акаунта. Спробуйте ще раз.");
-  }
+  }); } catch (error) { if (!isExpiredAccountSession(error)) throw error; }
 }
 
 export async function deleteAccount(accessToken: string) {
-  const response = await fetch(`${apiUrl}/api/account`, {
+  // A 401 does NOT prove that the account was deleted.
+  await requestJson<void>("/api/account", "Не вдалося видалити акаунт. Спробуйте ще раз.", {
     method: "DELETE",
     headers: { "Authorization": `Bearer ${accessToken}` },
   });
-  if (!response.ok && response.status !== 401) {
-    throw new Error("Не вдалося видалити акаунт. Спробуйте ще раз.");
-  }
 }
 
 export async function changeAccountPassword(accessToken: string, currentPassword: string, newPassword: string) {
-  const response = await fetch(`${apiUrl}/api/account/password`, {
+  return requestJson<AccountSession>("/api/account/password", "Не вдалося змінити пароль.", {
     method: "PUT",
     headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ currentPassword, newPassword }),
-  });
-  if (!response.ok) {
-    throw new Error(response.status === 401 ? "Поточний пароль неправильний." : "Не вдалося змінити пароль.");
-  }
-  return response.json() as Promise<AccountSession>;
+    statusMessage: (status) => status === 401 ? "Поточний пароль неправильний або сесія завершилася. Увійдіть ще раз." : "Не вдалося змінити пароль.",
+  }).then(decodeAccountSession);
 }
 
 export async function updateAccountFavorites(accessToken: string, routeIds: string[], stopIds: string[]) {
-  const response = await fetch(`${apiUrl}/api/account/favorites`, {
+  return requestJson<AccountSession["favorites"]>("/api/account/favorites", "Не вдалося зберегти обране. Спробуйте ще раз.", {
     method: "PUT",
     headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ routeIds, stopIds }),
-  });
-  if (!response.ok) {
-    throw new Error("Не вдалося зберегти обране. Спробуйте ще раз.");
-  }
-  return response.json() as Promise<AccountSession["favorites"]>;
+  }).then(decodeFavorites);
+}
+
+export function updateAccountPreferences(accessToken: string, preferences: AccountSession["preferences"]) {
+  return requestJson<AccountSession["preferences"]>("/api/account/preferences", "Не вдалося зберегти налаштування. Спробуйте ще раз.", {
+    method: "PUT",
+    headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
+  }).then(decodePreferences);
 }

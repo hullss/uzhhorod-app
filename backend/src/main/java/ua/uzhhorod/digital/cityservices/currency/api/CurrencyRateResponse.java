@@ -7,5 +7,6 @@ public record CurrencyRateResponse(
         String code,
         BigDecimal buy,
         BigDecimal sell,
-        Instant updatedAt) {
+        Instant updatedAt,
+        boolean reference) {
 }

@@ -60,6 +60,9 @@ public class AccessibleBuildingService {
                 List<AccessibleBuildingResponse> buildings = StreamSupport.stream(
                                 response.path("result").path("records").spliterator(), false)
                         .map(AccessibleBuildingParser::parse)
+                        .collect(java.util.stream.Collectors.toMap(AccessibleBuildingResponse::id, item -> item,
+                                (a, b) -> a.monitoredAt() == null || (b.monitoredAt() != null && b.monitoredAt().isAfter(a.monitoredAt())) ? b : a,
+                                java.util.LinkedHashMap::new)).values().stream()
                         .sorted(Comparator.comparing(AccessibleBuildingResponse::name, String.CASE_INSENSITIVE_ORDER))
                         .toList();
                 snapshot = new Snapshot(Instant.now(), false, buildings);

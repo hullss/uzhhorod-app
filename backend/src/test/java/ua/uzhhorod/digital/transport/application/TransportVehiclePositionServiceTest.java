@@ -46,7 +46,7 @@ class TransportVehiclePositionServiceTest {
             assertThat(vehicle.longitude()).isEqualTo(22.276235);
             assertThat(vehicle.speedKph()).isEqualTo(24);
             assertThat(vehicle.headingDegrees()).isEqualTo(90);
-            assertThat(vehicle.measuredAt()).hasToString("2026-09-28T12:00:00Z");
+            assertThat(vehicle.measuredAt()).isNull();
         });
     }
 }

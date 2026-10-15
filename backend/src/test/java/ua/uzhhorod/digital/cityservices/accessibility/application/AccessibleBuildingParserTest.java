@@ -9,6 +9,13 @@ class AccessibleBuildingParserTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Test void missingBuildingIdHasStableNonEmptyIdentity() throws Exception {
+        var a = objectMapper.readTree("{\"entityName\":\"A\",\"addressThoroughfare\":\"Street\"}");
+        var b = objectMapper.readTree("{\"entityName\":\"B\",\"addressThoroughfare\":\"Street\"}");
+        assertThat(AccessibleBuildingParser.parse(a).id()).isNotBlank().isEqualTo(AccessibleBuildingParser.parse(a).id());
+        assertThat(AccessibleBuildingParser.parse(a).id()).isNotEqualTo(AccessibleBuildingParser.parse(b).id());
+    }
+
     @Test
     void buildsDisplayNameAddressAndMonitoringDateFromOfficialFields() throws Exception {
         var record = objectMapper.readTree("""
