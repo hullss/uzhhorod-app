@@ -65,12 +65,27 @@ final class OfficialArticleExtractor {
                 .matcher(NON_CONTENT.matcher(bodyHtml).replaceAll(""));
         while (anchors.find()) {
             String url = safeUrl(anchors.group(2).replace("&amp;", "&"), sourceUrl, false);
-            if (url == null) continue;
+            if (url == null || isImageUrl(url)) continue;
+            // The app has no CMS carousel/anchor targets to navigate to.
+            if (url.contains("#") && url.split("#", 2)[0].equals(sourceUrl.split("#", 2)[0])) continue;
             var text = blocks(anchors.group(3));
             String title = text.stream().map(Block::text).collect(java.util.stream.Collectors.joining(" "));
+            // CMS galleries wrap each thumbnail in a link to the original photo.
+            // Keep actual documents (including image-only PDF download buttons).
+            if (title.isBlank() && IMAGE.matcher(anchors.group(3)).find() && !isDocumentUrl(url)) continue;
             links.putIfAbsent(url, new Link(title.isBlank() ? "Відкрити посилання" : title, url));
         }
         return List.copyOf(links.values());
+    }
+
+    private static boolean isImageUrl(String url) {
+        return URI.create(url).getPath().toLowerCase(java.util.Locale.ROOT)
+                .matches(".*\\.(?:jpe?g|png|webp|gif|avif|bmp|tiff?|svg)$");
+    }
+
+    private static boolean isDocumentUrl(String url) {
+        return URI.create(url).getPath().toLowerCase(java.util.Locale.ROOT)
+                .matches(".*\\.(?:pdf|docx?|xlsx?|pptx?|odt|ods|rtf|txt|csv|zip)$");
     }
 
     static String image(String articleHtml, String sourceUrl) {

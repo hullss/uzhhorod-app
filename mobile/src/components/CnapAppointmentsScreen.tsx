@@ -9,7 +9,7 @@ import { appointmentDates, CNAP_CENTER, CNAP_SERVICES, createAppointment, dateLa
 import { persistAppointments, restoreAppointments } from "../storage/demoCivic";
 import { ChoiceRow, civicStyles, civicTheme, PrimaryButton, SecondaryButton, ServiceHeader, ServiceSheet, ServiceTabs, useHardwareBack, useServiceSwipeBack } from "./CivicServiceUI";
 
-type Panel = "none" | "info" | "record";
+type Panel = "none" | "info" | "record" | "cancel";
 // One automatic reception location per service; no redundant centre picker.
 export const cnapAddress = (serviceId: string) => serviceId === "social" ? "пл. Шандора Петефі, 24" : "пл. Поштова, 3";
 export function CnapAppointmentsScreen({ isDarkTheme: dark, onBack }: { isDarkTheme: boolean; onBack: () => void }) {
@@ -43,7 +43,8 @@ export function CnapAppointmentsScreen({ isDarkTheme: dark, onBack }: { isDarkTh
   useEffect(() => { void load(); }, [load]);
   const goBack = useCallback(() => {
     if (saving.current) return;
-    if (panel !== "none") setPanel("none");
+    if (panel === "cancel") setPanel("record");
+    else if (panel !== "none") setPanel("none");
     else if (step > 1) setStep(step - 1);
     else if (step === 1) setStep(0);
     else onBack();
@@ -102,8 +103,8 @@ export function CnapAppointmentsScreen({ isDarkTheme: dark, onBack }: { isDarkTh
       {error && panel === "none" ? <View accessibilityLiveRegion="polite" style={{ gap: 8 }}><Text style={s.body}>{error}</Text>{!loaded && <PrimaryButton dark={dark} title="Спробувати ще раз" onPress={() => void load()} />}</View> : null}
       {step === 0 && <>
         {tab === 0 && visible.length === 0 && loaded && <View style={s.card}>
-          <View style={{ alignItems: "center", paddingVertical: 4 }}><Ionicons name="business-outline" size={36} color={c.accent} /></View>
-          <Text accessibilityRole="header" style={[s.title, { textAlign: "center" }]}>Запис в електронну чергу</Text>
+          <View style={{ alignItems: "center", paddingVertical: 4 }}><Ionicons name="business-outline" size={28} color={c.accent} /></View>
+          <Text accessibilityRole="header" style={[s.title, { textAlign: "center", fontSize: 17, lineHeight: 24 }]}>Запис в електронну чергу</Text>
           <Text style={[s.body, { textAlign: "center" }]}>Оберіть послугу та зручний час візиту.</Text>
           <PrimaryButton dark={dark} title="Записатися" onPress={start} />
           <Text style={[s.muted, { textAlign: "center" }]}>Тестовий сценарій · до ЦНАП не передається</Text>
@@ -151,8 +152,17 @@ export function CnapAppointmentsScreen({ isDarkTheme: dark, onBack }: { isDarkTh
         <Text selectable style={s.muted}>Номер прикладу: {record.id}</Text>
         <Text style={s.muted}>Збережено лише на цьому пристрої. Це не талон електронної черги й не підтвердження від ЦНАП.</Text>
         {!!error && <Text accessibilityLiveRegion="polite" style={s.body}>{error}</Text>}
-        {isUpcoming(record, clock) ? <PrimaryButton dark={dark} disabled={busy} title={busy ? "Зберігаємо…" : "Скасувати тестовий запис"} onPress={() => void updateRecord()} /> : <PrimaryButton dark={dark} disabled={busy} title={busy ? "Видаляємо…" : "Видалити з архіву"} onPress={() => void updateRecord(true)} />}
-        <SecondaryButton dark={dark} disabled={busy} title="Закрити" onPress={() => { setPanel("none"); setError(""); }} />
+        <PrimaryButton dark={dark} disabled={busy} title="Готово" onPress={() => { setPanel("none"); setJustSaved(false); setError(""); }} />
+        {isUpcoming(record, clock) ? <SecondaryButton dark={dark} disabled={busy} title="Скасувати тестовий запис" onPress={() => { setError(""); setPanel("cancel"); }} /> : <SecondaryButton dark={dark} disabled={busy} title={busy ? "Видаляємо…" : "Видалити з архіву"} onPress={() => void updateRecord(true)} />}
+      </>}
+      {panel === "cancel" && record && <>
+        <Text accessibilityRole="header" style={s.title}>Скасувати цей тестовий запис?</Text>
+        <Text style={s.body}>{serviceTitle(record.serviceId)}</Text>
+        <Text style={s.title}>{dateLabel(record.date)} · {record.time}</Text>
+        <Text style={s.muted}>Запис буде перенесено до архіву на цьому пристрої.</Text>
+        {!!error && <Text accessibilityLiveRegion="polite" style={s.body}>{error}</Text>}
+        <SecondaryButton dark={dark} disabled={busy} title="Залишити запис" onPress={() => { setError(""); setPanel("record"); }} />
+        <PrimaryButton dark={dark} disabled={busy} title={busy ? "Зберігаємо…" : "Так, скасувати запис"} onPress={() => void updateRecord()} />
       </>}
     </ServiceSheet>
   </SafeAreaView>;

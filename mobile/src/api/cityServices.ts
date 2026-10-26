@@ -1,4 +1,5 @@
 import { requestJson } from "./request";
+import { decodeMiniatures } from "../miniatures/catalog";
 import { decodeBuildings, decodeCurrency, decodeFunds, decodeNews, decodeWeather } from "./catalogues";
 import { decodeEventCatalog, type EventCatalog } from "../events/catalog";
 import { decodeOfficialNewsArticle, type OfficialNewsArticle } from "../news/article";
@@ -107,8 +108,10 @@ export type MiniSculpture = {
   longitude: number;
   address: string;
   author: string;
-  installedAt: string;
+  installedAt: string | null;
+  installedYear?: number;
   summary: string;
+  sourceUrls?: string[];
 };
 
 export type MiniSculptureList = {
@@ -188,7 +191,7 @@ export async function getWeather(): Promise<Weather> {
 }
 
 export async function getMiniSculptures(): Promise<MiniSculptureList> {
-  return request("/api/city-services/miniatures", "Не вдалося завантажити мініскульптури");
+  return decodeMiniatures(await request("/api/city-services/miniatures", "Не вдалося завантажити мініскульптури"));
 }
 
 export async function getAirAlertStatus(): Promise<AirAlertStatus> {

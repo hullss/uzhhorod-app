@@ -34,6 +34,11 @@ assert.equal(ui.Text({ children: "Профіль", translate: false }).props.chi
 assert.equal(ui.TextInput({ placeholder: "Введіть пароль ще раз", value: "Профіль", accessibilityLabel: "Пароль" }).props.value, "Профіль");
 assert.equal(ui.TextInput({ placeholder: "Введіть пароль ще раз" }).props.placeholder, "Enter your password again");
 assert.equal(ui.Pressable({ accessibilityLabel: "Проголосувати" }).props.accessibilityLabel, "Vote");
+assert.equal(ui.Pressable({ accessibilityRole: "radio", accessibilityState: { checked: false } }).props["aria-checked"], false);
+assert.equal(ui.Pressable({ accessibilityRole: "checkbox", accessibilityState: { checked: true, disabled: true } }).props["aria-checked"], true);
+assert.equal(ui.Pressable({ accessibilityState: { selected: true } }).props["aria-selected"], true);
+assert.equal(ui.Pressable({ disabled: true }).props["aria-disabled"], true);
+assert.equal(ui.Pressable({ "aria-checked": false, accessibilityState: { checked: true } }).props["aria-checked"], false);
 ui.Alert.alert("Видалити акаунт?", "Спробуйте ще раз.", [{ text: "Скасувати", onPress() {} }]);
 assert.equal(called[0][0], "Delete account?"); assert.equal(called[0][2][0].text, "Cancel");
 assert.equal(typeof called[0][2][0].onPress, "function");

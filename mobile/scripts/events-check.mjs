@@ -56,7 +56,7 @@ assert.throws(() => events.decodeEventCatalog({ items: {} }));
 assert.equal(events.decodeEventCatalog({ items: [] }).items.length, 0);
 console.log("PASS: missing year, invalid dates, duplicate IDs, unsafe links, broken posters, null fields and real empty catalogue");
 
-const api = module("../src/api/cityServices.ts", { "./request": { requestJson: async () => ({ items: [] }) }, "./catalogues": {}, "../events/catalog": events, "../news/article": module("../src/news/article.ts"), "../maps/safety": module("../src/maps/safety.ts") });
+const api = module("../src/api/cityServices.ts", { "./request": { requestJson: async () => ({ items: [] }) }, "./catalogues": {}, "../miniatures/catalog": {}, "../events/catalog": events, "../news/article": module("../src/news/article.ts"), "../maps/safety": module("../src/maps/safety.ts") });
 assert.equal((await api.getEditorialEvents()).items.length, 0);
 const latest = module("../src/utils/latestRequest.ts"); const requests = new latest.LatestRequest();
 const first = requests.begin(); const second = requests.begin();

@@ -3,6 +3,7 @@ import { PowerOutagesScreen } from "./src/components/PowerOutagesScreen";
 import { newsDateLabel } from "./src/news/article";
 import { Alert, Pressable, Text, TextInput, useLanguage } from "./src/i18n/ui";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
+import { Asset } from "expo-asset";
 import { Ionicons } from "@expo/vector-icons";
 import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,6 +15,8 @@ import { AddressesScreen } from "./src/components/AddressesScreen";
 import { ProfileOverviewScreen } from "./src/components/ProfileOverviewScreen";
 import { FavoritesScreen } from "./src/components/FavoritesScreen";
 import { PersonalDetailsScreen, ProfileSettingsScreen, SegmentedChoice } from "./src/components/ProfileSettingsScreen";
+import { HomeServicesSettingsScreen, type HomeServiceOption } from "./src/components/HomeServicesSettingsScreen";
+import { HOME_SERVICE_IDS, persistHomeServices, restoreHomeServices, type HomeServiceId } from "./src/storage/homeServices";
 import { TransportStopsScreen } from "./src/components/TransportStopsScreen";
 import { TransportCacheNotice } from "./src/components/TransportCacheNotice";
 import { StorageRecoveryNotice } from "./src/components/StorageRecoveryNotice";
@@ -23,6 +26,7 @@ import { ParkingDemoScreen } from "./src/components/ParkingDemoScreen";
 import { RouteMap, type MapRegion } from "./src/components/RouteMap";
 import { OfficialLayerMap } from "./src/components/OfficialLayerMap";
 import { MiniaturesMap } from "./src/components/MiniaturesMap";
+import { searchMiniatures } from "./src/miniatures/catalog";
 import { DemoTransportPaymentScreen } from "./src/components/DemoTransportPaymentScreen";
 import { CnapAppointmentsScreen } from "./src/components/CnapAppointmentsScreen";
 import { PollsScreen } from "./src/components/PollsScreen";
@@ -83,6 +87,7 @@ import { LatestRequest } from "./src/utils/latestRequest";
 import { isFreshSnapshot } from "./src/utils/freshness";
 import { transportLiveState } from "./src/utils/transportLive";
 import { CITY_TIME_ZONE, cityClock, cityDate, citySeconds } from "./src/utils/cityTime";
+import { visibleScheduleDepartures } from "./src/utils/transportSchedule";
 import { PAGE_LAYOUT } from "./src/ui/layout";
 import { APP_FONTS } from "./src/ui/fonts";
 import { COLOR_TOKENS } from "./src/ui/themeTokens";
@@ -107,7 +112,7 @@ type StopScreen = {
 
 type CityService = {
   id: "cnap" | "transport-payment" | "polls" | "accessibility" | "parking" | "power-outages" | "shelters" | "resilience" | "waste" | "playgrounds" | "miniatures" | "donations" | "events";
-  category: "mobility" | "civic" | "safety" | "places";
+  category: "mobility" | "civic" | "safety" | "daily" | "leisure" | "community";
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   description: string;
@@ -129,10 +134,12 @@ type DefenderFund = {
 
 
 const SERVICE_CATEGORIES: Array<{ id: CityService["category"]; title: string }> = [
-  { id: "mobility", title: "Пересування" },
-  { id: "civic", title: "Справи з містом" },
-  { id: "safety", title: "Безпека та безбар’єрність" },
-  { id: "places", title: "Місця й прогулянки" },
+  { id: "mobility", title: "Транспорт і паркування" },
+  { id: "daily", title: "Дім і комунальні послуги" },
+  { id: "civic", title: "Документи та ЦНАП" },
+  { id: "safety", title: "Безпека й доступність" },
+  { id: "leisure", title: "Події та дозвілля" },
+  { id: "community", title: "Участь і допомога" },
 ];
 
 type RootTab = "home" | "feed" | "services" | "profile";
@@ -140,7 +147,7 @@ type RootTab = "home" | "feed" | "services" | "profile";
 const CITY_SERVICES: CityService[] = [
   {
     id: "events",
-    category: "places",
+    category: "leisure",
     icon: "calendar-outline",
     title: "Події міста",
     description: "Виставки, зустрічі, спорт, концерти та сімейні події.",
@@ -159,7 +166,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "donations",
-    category: "safety",
+    category: "community",
     icon: "heart-outline",
     title: "Підтримати військо",
     description: "Добірка офіційних зборів на потреби закарпатських підрозділів.",
@@ -179,7 +186,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "polls",
-    category: "civic",
+    category: "community",
     icon: "checkbox-outline",
     title: "Опитування",
     testScenario: true,
@@ -210,7 +217,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "power-outages",
-    category: "safety",
+    category: "daily",
     icon: "flash-outline",
     title: "Світло за адресою",
     description: "Перевірка аварійних, планових і графікових відключень від Закарпаттяобленерго.",
@@ -240,7 +247,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "waste",
-    category: "places",
+    category: "daily",
     icon: "trash-outline",
     title: "Сортування та відходи",
     description: "Контейнерні майданчики, небезпечні відходи й точки прийому сировини.",
@@ -250,7 +257,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "playgrounds",
-    category: "places",
+    category: "leisure",
     icon: "football-outline",
     title: "Майданчики",
     description: "Дитячі, спортивні та інші місця для активного відпочинку.",
@@ -260,7 +267,7 @@ const CITY_SERVICES: CityService[] = [
   },
   {
     id: "miniatures",
-    category: "places",
+    category: "leisure",
     icon: "walk-outline",
     title: "Мініскульптури Ужгорода",
     description: "Прогулянковий маршрут і мапа маленьких символів міста.",
@@ -268,6 +275,12 @@ const CITY_SERVICES: CityService[] = [
     notice: "Власний каталог уже має першу добірку локацій і буде доповнюватися. Ми не використовуємо чужі фотографії чи скопійовані описи.",
   },
 ];
+
+const HOME_SERVICE_OPTIONS: HomeServiceOption[] = HOME_SERVICE_IDS.map(id => {
+  if (id === "transport") return { id, title: "Громадський транспорт", icon: "bus-outline" };
+  const service = CITY_SERVICES.find(item => item.id === id)!;
+  return { id, title: service.title, icon: service.icon, testScenario: service.testScenario };
+});
 
 // This list intentionally starts empty. Add a collection only after its direct donation link,
 // official confirmation and the date of verification have been checked by the editorial team.
@@ -284,7 +297,7 @@ const PARKING_PORTAL_URL = "https://pdr.rada-uzhgorod.gov.ua/";
 const PARKING_EVACUATION_URL = "https://pdr.rada-uzhgorod.gov.ua/evacuation/";
 const PARKING_INSPECTOR_URL = "https://pdr.rada-uzhgorod.gov.ua/inspector/";
 const PARKING_DATASET_URL = "https://data.rada-uzhgorod.gov.ua/dataset/69463bbd-3985-45cf-8966-a35d709176a3";
-const UZHHOROD_DIGITAL_LOGO = require("./assets/brand/uzhhorod-digital-logo.png");
+const UZHHOROD_DIGITAL_LOGO = require("./assets/brand/uzhhorod-digital-mark.png");
 
 type AppPalette = {
   navy: string;
@@ -366,6 +379,7 @@ function BrandMark({ size = 34 }: { size?: number }) {
   return <Image
     accessibilityLabel={translate("Логотип Ужгород Цифровий")}
     source={UZHHOROD_DIGITAL_LOGO}
+    fadeDuration={0}
     style={[styles.brandMark, { borderRadius: Math.round(size * 0.22), height: size, width: size }]}
   />;
 }
@@ -415,11 +429,13 @@ function AppContent() {
   COLORS = isDarkTheme ? DARK_COLORS : LIGHT_COLORS;
   styles = useMemo(() => buildStyles(isDarkTheme), [isDarkTheme]);
   const [introVisible, setIntroVisible] = useState(true);
+  // Warm the bundled asset once. Tab changes keep the same local image source.
+  useEffect(() => { void Asset.loadAsync(UZHHOROD_DIGITAL_LOGO).catch(() => undefined); }, []);
   const introOpacity = useRef(new Animated.Value(0)).current;
   const introScale = useRef(new Animated.Value(0.94)).current;
   const [section, setSection] = useState<"hub" | "transport">("hub");
   const [activeTab, setActiveTab] = useState<RootTab>("home");
-  const [profilePanel, setProfilePanel] = useState<"notifications" | "language" | "account" | "payment-methods" | "legal" | "address" | "settings" | "personal" | "favorites" | null>(null);
+  const [profilePanel, setProfilePanel] = useState<"notifications" | "language" | "account" | "payment-methods" | "legal" | "address" | "settings" | "personal" | "favorites" | "home-services" | null>(null);
   const [profileReturn, setProfileReturn] = useState<"settings" | "favorites" | null>(null);
   const [transportFromFavorites, setTransportFromFavorites] = useState(false);
   const closeProfilePanel = () => { setProfilePanel(profileReturn); setProfileReturn(null); };
@@ -428,6 +444,9 @@ function AppContent() {
   const accountMutationLocked = useRef(false);
   const preferencesRevision = useRef(0);
   const [preferencesReady, setPreferencesReady] = useState(false);
+  const [homeServiceIds, setHomeServiceIds] = useState<HomeServiceId[] | null>(null);
+  const [homeServicesError, setHomeServicesError] = useState(false);
+  const [homeServicesRetry, setHomeServicesRetry] = useState(0);
   const [storageRetry, setStorageRetry] = useState(0);
   const [storageErrors, setStorageErrors] = useState({ preferences: false, card: false, tickets: false });
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATIONS);
@@ -552,6 +571,23 @@ function AppContent() {
 
   useEffect(() => {
     let active = true;
+    setHomeServicesError(false);
+    void restoreHomeServices().then(ids => { if (active) setHomeServiceIds(ids); })
+      .catch(() => { if (active) setHomeServicesError(true); });
+    return () => { active = false; };
+  }, [homeServicesRetry]);
+
+  async function saveHomeServices(ids: HomeServiceId[]) {
+    await persistHomeServices(ids);
+    setHomeServiceIds(ids);
+  }
+
+  function openHomeServicesSettings() {
+    setSection("hub"); setActiveTab("profile"); setProfileReturn("settings"); setProfilePanel("home-services");
+  }
+
+  useEffect(() => {
+    let active = true;
     if (preferencesReady && !storageErrors.preferences) return;
     setPreferencesReady(false);
     void restorePreferences().then((saved) => {
@@ -617,7 +653,7 @@ function AppContent() {
   useEffect(() => {
     // These service flows handle their own steps and sheets; do not skip them on Android back.
     if (["cnap", "polls", "events", "transport-payment", "parking", "waste", "power-outages"].includes(selectedService?.id ?? "")) return;
-    if (section === "hub" && profilePanel && ["address", "personal", "settings", "language", "payment-methods", "favorites"].includes(profilePanel)) return;
+    if (section === "hub" && profilePanel && ["address", "personal", "settings", "language", "payment-methods", "favorites", "home-services"].includes(profilePanel)) return;
     if (section === "transport" && searchMode === "stops" && !selectedRoute && !selectedStop && !loading && !error && !showDataSources) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", goBack);
     return () => subscription.remove();
@@ -944,7 +980,7 @@ function AppContent() {
   const showDataSources = kind === "data-sources";
   const searchMode = kind === "transport-stops" ? "stops" : "routes";
   if (section === "hub") {
-    if (kind === "home") return <HomeScreen visible={homeVisible} onOpenTransport={openTransportHub} onOpenWeather={() => setWeatherOpen(true)} onOpenService={openCityService} onOpenArticle={item => openNewsArticle(item, "home")} onChangeTab={navigateToTab} />;
+    if (kind === "home") return <HomeScreen visible={homeVisible} homeServiceIds={homeServiceIds} homeServicesError={homeServicesError} onRetryHomeServices={() => setHomeServicesRetry(value => value + 1)} onConfigureServices={openHomeServicesSettings} onOpenTransport={openTransportHub} onOpenWeather={() => setWeatherOpen(true)} onOpenService={openCityService} onOpenArticle={item => openNewsArticle(item, "home")} onChangeTab={navigateToTab} />;
     if (kind === "checkout-card") return <PaymentMethodsScreen
       accountEmail={account?.preferences.email} card={demoPaymentCard}
       storageNotice={storageErrors.card ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null}
@@ -1027,8 +1063,9 @@ function AppContent() {
       if (profilePanel === "personal") {
         return <PersonalDetailsScreen dark={isDarkTheme} disabled={!preferencesReady} name={displayName} onSave={next => { preferencesRevision.current++; setDisplayName(next); }} onBack={() => setProfilePanel(null)} />;
       }
+      if (profilePanel === "home-services") return <HomeServicesSettingsScreen dark={isDarkTheme} options={HOME_SERVICE_OPTIONS} selected={homeServiceIds} loadError={homeServicesError} onRetry={() => setHomeServicesRetry(value => value + 1)} onSave={saveHomeServices} onBack={closeProfilePanel} />;
       if (profilePanel === "settings" || profilePanel === "language") {
-        return <ProfileSettingsScreen dark={isDarkTheme} controlsDisabled={!preferencesReady} language={language} theme={themeMode} storageNotice={Object.values(storageErrors).some(Boolean) ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null} onLanguage={next => void changePreferences(next, notificationPreferences)} onTheme={next => { preferencesRevision.current++; setThemeMode(next); }} onNotifications={() => { setProfileReturn("settings"); setProfilePanel("notifications"); }} onLegal={() => { setProfileReturn("settings"); setProfilePanel("legal"); }} onAccount={() => { setProfileReturn("settings"); setProfilePanel("account"); }} onAbout={() => Alert.alert("Ужгород Цифровий", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")} onBack={closeProfilePanel} />;
+        return <ProfileSettingsScreen dark={isDarkTheme} controlsDisabled={!preferencesReady} onHomeServices={openHomeServicesSettings} language={language} theme={themeMode} storageNotice={Object.values(storageErrors).some(Boolean) ? <StorageRecoveryNotice dark={isDarkTheme} onRetry={() => setStorageRetry(value => value + 1)} /> : null} onLanguage={next => void changePreferences(next, notificationPreferences)} onTheme={next => { preferencesRevision.current++; setThemeMode(next); }} onNotifications={() => { setProfileReturn("settings"); setProfilePanel("notifications"); }} onLegal={() => { setProfileReturn("settings"); setProfilePanel("legal"); }} onAccount={() => { setProfileReturn("settings"); setProfilePanel("account"); }} onAbout={() => Alert.alert("Ужгород Цифровий", "Міський застосунок із перевіреними сервісами, розкладами та довідками. Дані показуємо лише з офіційних або вказаних джерел.")} onBack={closeProfilePanel} />;
       }
       if (profilePanel === "notifications") {
         return <NotificationSettingsScreen enabled={notificationPreferences} saving={savingPreferences} accountConnected={Boolean(account)} onChange={(next) => void changePreferences(language, next)} onBack={closeProfilePanel} />;
@@ -1059,6 +1096,7 @@ function AppContent() {
         onPersonal={() => setProfilePanel("personal")} onSettings={() => setProfilePanel("settings")} onAccount={() => setProfilePanel("account")}
         onAddresses={() => setProfilePanel("address")} onCards={() => setProfilePanel("payment-methods")}
         onTickets={() => openCityService("transport-payment", "history")} onAppointments={() => openCityService("cnap")}
+        onPower={() => openCityService("power-outages")} onPolls={() => openCityService("polls")} onHomeServices={openHomeServicesSettings}
         onFavorites={() => setProfilePanel("favorites")} footer={<BottomNavigation activeTab="profile" onChangeTab={navigateToTab} />} />;
     }
     if (activeTab === "services") {
@@ -1258,6 +1296,10 @@ function ServiceGridCard({ icon, title, testScenario = false, onPress }: { icon:
 
 function HomeScreen({
   visible,
+  homeServiceIds,
+  homeServicesError,
+  onRetryHomeServices,
+  onConfigureServices,
   onOpenTransport,
   onOpenWeather,
   onOpenService,
@@ -1265,6 +1307,10 @@ function HomeScreen({
   onChangeTab,
 }: {
   visible: boolean;
+  homeServiceIds: HomeServiceId[] | null;
+  homeServicesError: boolean;
+  onRetryHomeServices: () => void;
+  onConfigureServices: () => void;
   onOpenTransport: () => void;
   onOpenWeather: () => void;
   onOpenService: (id: CityService["id"]) => void;
@@ -1323,8 +1369,25 @@ function HomeScreen({
         </View>
 
         <WeatherPreview visible={visible} refreshSignal={newsRefreshSignal} onLoadEnd={finishWeatherRefresh} onPress={onOpenWeather} onOpenShelters={() => onOpenService("shelters")} />
-
         <DefendersSupportBanner onPress={() => void openOfficialLink(FEATURED_DEFENDER_DONATION.donationUrl)} />
+
+        <View style={styles.dashboardSectionRow}>
+          <Text style={styles.dashboardSectionTitle}>Мої сервіси</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Налаштувати сервіси на головній" style={styles.smallAction} onPress={onConfigureServices}><Text style={styles.dashboardAllLink}>Налаштувати</Text></Pressable>
+        </View>
+        {homeServiceIds === null ? <View style={{ paddingVertical: 16, gap: 8 }}>
+          <Text style={styles.dashboardInfoText}>{homeServicesError ? "Не вдалося прочитати вибір сервісів." : "Завантажуємо ваш вибір…"}</Text>
+          {homeServicesError && <Pressable accessibilityRole="button" style={styles.smallAction} onPress={onRetryHomeServices}><Text style={styles.dashboardAllLink}>Повторити</Text></Pressable>}
+        </View> : homeServiceIds.length === 0 ? <Text style={[styles.dashboardInfoText, { paddingVertical: 16 }]}>Оберіть сервіси через кнопку «Налаштувати».</Text> :
+          <View style={styles.dashboardServicesGrid}>
+            {homeServiceIds.map(id => {
+              const option = HOME_SERVICE_OPTIONS.find(item => item.id === id)!;
+              return <DashboardServiceCard key={id} icon={option.icon} title={option.title} testScenario={option.testScenario}
+                onPress={id === "transport" ? onOpenTransport : () => onOpenService(id)} />;
+            })}
+          </View>}
+
+        <CurrencyWidget refreshSignal={newsRefreshSignal} onLoadEnd={finishCurrencyRefresh} />
 
         <View style={styles.dashboardSectionRow}>
           <Text style={styles.dashboardSectionTitle}>Останні новини</Text>
@@ -1337,19 +1400,7 @@ function HomeScreen({
           onOpenArticle={onOpenArticle}
         />
 
-        <CurrencyWidget refreshSignal={newsRefreshSignal} onLoadEnd={finishCurrencyRefresh} />
 
-        <View style={styles.dashboardSectionRow}>
-          <Text style={styles.dashboardSectionTitle}>Популярні сервіси</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Усі сервіси" style={styles.smallAction} onPress={() => onChangeTab("services")}><Text style={styles.dashboardAllLink}>Усі</Text></Pressable>
-        </View>
-        <View style={styles.dashboardServicesGrid}>
-          <DashboardServiceCard icon="bus-outline" title="Рух транспорту" onPress={onOpenTransport} />
-          <DashboardServiceCard icon="card-outline" title="Оплата проїзду" testScenario onPress={() => onOpenService("transport-payment")} />
-          <DashboardServiceCard icon="car-outline" title="Паркування" testScenario onPress={() => onOpenService("parking")} />
-          <DashboardServiceCard icon="accessibility-outline" title="Безбар’єрність" onPress={() => onOpenService("accessibility")} />
-          <DashboardServiceCard icon="document-text-outline" title="Запис до ЦНАП" testScenario onPress={() => onOpenService("cnap")} />
-        </View>
       </ScrollView>
       <BottomNavigation activeTab="home" onChangeTab={onChangeTab} />
     </SafeAreaView>
@@ -1431,9 +1482,12 @@ function DefendersSupportScreen({ onBack }: { onBack: () => void }) {
 }
 
 function DashboardServiceCard({ icon, title, testScenario = false, onPress }: { icon: keyof typeof Ionicons.glyphMap; title: string; testScenario?: boolean; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" style={styles.dashboardServiceCard} onPress={onPress}>
-    <View style={styles.dashboardServiceIcon}><Ionicons name={icon} size={24} color={COLORS.navy} /></View>
-    <View style={{ flex: 1, gap: 3 }}><Text style={styles.dashboardServiceTitle}>{title}</Text>{testScenario && <Text style={styles.testScenarioLabel}>Тестовий сценарій</Text>}</View>
+  return <Pressable accessibilityLabel={`Відкрити сервіс: ${title}${testScenario ? ". Тестовий сценарій" : ""}`} accessibilityRole="button" style={[styles.serviceGridCard, styles.dashboardServiceCard]} onPress={onPress}>
+    <View style={styles.dashboardServiceBody}>
+      <View style={[styles.serviceGridIcon, styles.dashboardServiceIcon]}><Ionicons name={icon} size={20} color={COLORS.navy} /></View>
+      <Text style={[styles.serviceGridTitle, styles.dashboardServiceTitle]}>{title}</Text>
+    </View>
+    {testScenario && <Text style={[styles.testScenarioLabel, styles.dashboardServiceTestLabel]}>Тестовий сценарій</Text>}
   </Pressable>;
 }
 
@@ -1574,8 +1628,8 @@ function WeatherPreview({ visible, refreshSignal, onLoadEnd, onPress, onOpenShel
       </View>
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityHint="Статус тривоги та укриття" onPress={() => setAlertOpen(true)} accessibilityLabel={translate(alertIsActive ? "Повітряна тривога" : alertState === "CLEAR" ? "Повітряної тривоги немає" : "Актуальний статус тривоги недоступний. Перевірте офіційні повідомлення.")} style={[styles.weatherFeatureAlert, compact && styles.weatherFeatureAlertCompact, alertIsActive ? styles.weatherFeatureAlertActive : alertState === "CLEAR" ? styles.weatherFeatureAlertClear : styles.weatherFeatureAlertUnknown]}>
-        <Ionicons name={alertIsActive ? "warning-outline" : alertState === "CLEAR" ? "shield-checkmark-outline" : "help-circle-outline"} size={20} color={alertIsActive ? COLORS.danger : alertState === "CLEAR" ? COLORS.green : COLORS.muted} />
-      <Text style={[styles.weatherFeatureAlertText, alertIsActive && styles.weatherFeatureAlertTextActive]}>{alertIsActive ? "Тривога" : alertState === "CLEAR" ? "Тривоги\nнемає" : "Статус\nневідомий"}</Text>
+        <Ionicons name={alertIsActive ? "warning-outline" : alertState === "CLEAR" ? "shield-checkmark-outline" : "help-circle-outline"} size={20} color={alertIsActive ? COLORS.danger : alertState === "CLEAR" ? COLORS.green : styles.weatherFeatureAlertTextUnknown.color} />
+      <Text style={[styles.weatherFeatureAlertText, alertIsActive ? styles.weatherFeatureAlertTextActive : alertState !== "CLEAR" && styles.weatherFeatureAlertTextUnknown]}>{alertIsActive ? "Тривога" : alertState === "CLEAR" ? "Тривоги\nнемає" : "Статус\nневідомий"}</Text>
     </Pressable>
   </View><ServiceSheet dark={dark} visible={alertOpen && visible} onClose={() => setAlertOpen(false)}><Text style={s.title}>{alertIsActive ? "Повітряна тривога" : alertState === "CLEAR" ? "Повітряної тривоги немає" : "Статус тривоги невідомий"}</Text><Text style={s.body}>{alertState === "UNAVAILABLE" ? "Актуальний статус тривоги недоступний. Перевірте офіційні повідомлення." : alert?.detail}</Text>{alertState !== "UNAVAILABLE" && alert && <Text style={s.muted}>Оновлено: {formatUpdatedAt(alert.fetchedAt)}</Text>}<PrimaryButton dark={dark} title="Відкрити укриття" onPress={() => { setAlertOpen(false); onOpenShelters(); }} /></ServiceSheet></>;
 }
@@ -1976,10 +2030,12 @@ function NotificationChoice({ icon, title, subtitle, enabled, disabled = false, 
 }
 
 function MiniaturesScreen({ onBack }: { onBack: () => void }) {
+  const [query, setQuery] = useState("");
   const [data, setData] = useState<MiniSculptureList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const swipeBack = useSwipeBack(onBack);
+  const visible = data ? searchMiniatures(data.sculptures, query) : [];
 
   useEffect(() => {
     void loadCatalog();
@@ -2002,6 +2058,7 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
       <StatusBar style="dark" />
       <View style={styles.pageHeader}>
       <InnerHeader title="Мініскульптури Ужгорода" onBack={onBack} />
+      <View style={styles.searchBox}><Ionicons name="search-outline" size={18} color={COLORS.muted} /><TextInput value={query} onChangeText={setQuery} placeholder="Назва, адреса або скульптор" accessibilityLabel="Пошук мініскульптур" placeholderTextColor={COLORS.muted} style={styles.searchInput} />{query !== "" && <Pressable accessibilityRole="button" accessibilityLabel="Очистити пошук" style={styles.smallAction} onPress={() => setQuery("")}><Ionicons name="close" size={20} color={COLORS.navy} /></Pressable>}</View>
       {loading && <ActivityIndicator style={styles.inlineLoader} color={COLORS.navy} />}
       {error && (
         <View style={styles.inlineError}>
@@ -2012,16 +2069,16 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
       </View>
       {data && !error && (
         <FlatList
-          data={data.sculptures}
+          data={visible}
           keyExtractor={(sculpture) => sculpture.id}
           contentContainerStyle={styles.miniaturesList}
           ListHeaderComponent={
             <>
               <View style={styles.miniaturesMapCard}>
-                <MiniaturesMap sculptures={data.sculptures} />
+                <MiniaturesMap sculptures={visible} />
               </View>
               <View style={styles.miniaturesCountRow}>
-                <View style={styles.miniaturesCountPill}><Ionicons name="walk-outline" size={15} color={COLORS.navy} /><Text style={styles.miniaturesCountText}>{data.sculptures.length} локація</Text></View>
+                <View style={styles.miniaturesCountPill}><Ionicons name="walk-outline" size={15} color={COLORS.navy} /><Text style={styles.miniaturesCountText}>{query.trim() ? `${visible.length} із ${data.sculptures.length}` : `Локацій: ${data.sculptures.length}`}</Text></View>
                 <Text style={styles.miniaturesSourceDate}>Джерело перевірено: {formatDateOnly(data.sourceCheckedAt)}</Text>
               </View>
               <View style={styles.miniaturesNotice}>
@@ -2032,7 +2089,8 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
             </>
           }
           renderItem={({ item, index }) => <MiniatureCard sculpture={item} index={index + 1} />}
-          ListFooterComponent={<Text style={styles.miniaturesFooter}>Додаємо нові точки поступово — тільки з координатами, які можна перевірити.</Text>}
+          ListEmptyComponent={<Text style={styles.empty}>Мініскульптур не знайдено. Спробуйте іншу назву або адресу.</Text>}
+          ListFooterComponent={<Text style={styles.miniaturesFooter}>Координати взято з туристичної мапи. Актуальне місце й доступність перевіряйте за джерелами.</Text>}
         />
       )}
     </SafeAreaView>
@@ -2040,24 +2098,25 @@ function MiniaturesScreen({ onBack }: { onBack: () => void }) {
 }
 
 function MiniatureCard({ sculpture, index }: { sculpture: MiniSculpture; index: number }) {
-  const installedAt = new Intl.DateTimeFormat(getLocale(), { year: "numeric" }).format(new Date(`${sculpture.installedAt}T12:00:00`));
+  const installedYear = sculpture.installedYear ?? (sculpture.installedAt ? Number(sculpture.installedAt.slice(0, 4)) : null);
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${sculpture.latitude},${sculpture.longitude}`;
   return (
     <View style={styles.miniatureCard}>
       <View style={styles.miniatureCardTop}>
         <View style={styles.miniatureNumber}><Text style={styles.miniatureNumberText}>{index}</Text></View>
         <View style={styles.miniatureCardCopy}>
-          <Text style={styles.miniatureTitle}>{sculpture.title}</Text>
-          <Text style={styles.miniatureAddress}>{sculpture.address}</Text>
+          <Text translate={false} style={styles.miniatureTitle}>{sculpture.title}</Text>
+          <Text translate={false} style={styles.miniatureAddress}>{sculpture.address}</Text>
         </View>
       </View>
-      <Text style={styles.miniatureSummary}>{sculpture.summary}</Text>
-      <View style={styles.miniatureMeta}><Text style={styles.miniatureMetaText}>{sculpture.author}</Text><Text style={styles.miniatureMetaText}>· {installedAt}</Text></View>
-      <Pressable style={styles.miniatureMapAction} onPress={() => void openOfficialLink(mapsUrl)}>
+      <Text translate={false} style={styles.miniatureSummary}>{sculpture.summary}</Text>
+      <View style={styles.miniatureMeta}><Text translate={false} style={styles.miniatureMetaText}>{sculpture.author}</Text>{installedYear && <Text translate={false} style={styles.miniatureMetaText}>· {installedYear}</Text>}</View>
+      <Pressable accessibilityRole="link" style={styles.miniatureMapAction} onPress={() => void openOfficialLink(mapsUrl)}>
         <Ionicons name="navigate-outline" size={16} color={COLORS.navy} />
         <Text style={styles.miniatureMapActionText}>Відкрити координати</Text>
         <Ionicons name="open-outline" size={15} color={COLORS.navy} />
       </Pressable>
+      {(sculpture.sourceUrls ?? []).map((url, index) => <Pressable key={url} accessibilityRole="link" accessibilityLabel={`Джерело інформації: ${new URL(url).hostname}`} style={styles.miniatureMapAction} onPress={() => void openOfficialLink(url)}><Ionicons name="information-circle-outline" size={16} color={COLORS.navy} /><Text style={styles.miniatureMapActionText}>{index === 0 ? "Туристична мапа MUSE Travel" : new URL(url).hostname}</Text><Ionicons name="open-outline" size={15} color={COLORS.navy} /></Pressable>)}
     </View>
   );
 }
@@ -2221,12 +2280,14 @@ function SafetyMapScreen({ kind, onBack }: { kind: "shelters" | "resilience"; on
     <StatusBar style="dark" />
     <View style={styles.cityMapHeader}>
       <InnerHeader title={title} onBack={onBack} />
-      <Pressable accessibilityRole="button" accessibilityLabel={listOpen ? "Показати мапу" : "Список адрес"} style={styles.smallAction} onPress={() => setListOpen(value => !value)}><Ionicons name={listOpen ? "map-outline" : "list-outline"} size={20} color={COLORS.navy} /><Text style={styles.inlineRetry}>{listOpen ? "Показати мапу" : "Список адрес"}</Text></Pressable>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: PAGE_LAYOUT.gutter }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={listOpen ? "Показати мапу" : "Список адрес"} style={[styles.smallAction, { flexDirection: "row", gap: 8 }]} onPress={() => setListOpen(value => !value)}><Ionicons name={listOpen ? "map-outline" : "list-outline"} size={20} color={COLORS.navy} /><Text style={styles.inlineRetry}>{listOpen ? "Показати мапу" : "Список адрес"}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Оновити позначки" accessibilityState={{ disabled: loading }} disabled={loading} style={styles.smallAction} onPress={() => setRefreshSignal(value => value + 1)}>{loading ? <ActivityIndicator color={COLORS.navy} /> : <Ionicons name="refresh" size={20} color={COLORS.navy} />}</Pressable>
+      </View>
       {listOpen && <View style={styles.searchBox}><Ionicons name="search-outline" size={18} color={COLORS.muted} /><TextInput value={addressQuery} onChangeText={setAddressQuery} placeholder="Назва або адреса" accessibilityLabel="Пошук адрес укриттів" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View>}
       <Text style={styles.cityMapHint}>{loading ? "Завантажуємо позначки…" : error ? "Позначки тимчасово недоступні" : `${points.length} позначок на мапі`}</Text>
       {isShelters && <Text style={styles.cityMapHint}>Позначка не підтверджує, що вхід зараз відкритий. Перевірте доступність укриття заздалегідь.</Text>}
       {error ? <Pressable accessibilityRole="button" onPress={() => setRefreshSignal((value) => value + 1)}><Text style={styles.inlineRetry}>Спробувати ще раз</Text></Pressable> : null}
-      {!loading && !error ? <Pressable accessibilityRole="button" accessibilityLabel="Оновити позначки" style={styles.smallAction} onPress={() => setRefreshSignal(value => value + 1)}><Ionicons name="refresh" size={20} color={COLORS.navy} /></Pressable> : null}
       {!loading && !error && points.length === 0 ? <Text style={styles.cityMapHint}>У цьому переліку поки немає точок. Перевірте офіційну карту.</Text> : null}
       {(dataStale || !!error) && points.length > 0 ? <Text style={styles.staleData}>Збережений перелік. Актуальність перевіряйте в офіційному джерелі.</Text> : null}
     </View>
@@ -2821,6 +2882,22 @@ function ScheduleDetails({
   onChangeDate: (date: string) => void;
 }) {
   const swipeBack = useSwipeBack(onBack);
+  const dark = useContext(AppThemeContext) ?? false;
+  const active = useScreenActive();
+  const [now, setNow] = useState(() => new Date());
+  const [showAll, setShowAll] = useState(() => schedule.date !== cityDate());
+  useEffect(() => { setShowAll(schedule.date !== cityDate()); }, [schedule.date]);
+  useEffect(() => {
+    if (!active) return;
+    const update = () => setNow(new Date());
+    update();
+    const timer = setInterval(update, 30_000);
+    const subscription = AppState.addEventListener("change", state => { if (state === "active") update(); });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, [active]);
+  const isToday = schedule.date === cityDate(now);
+  const upcomingOnly = isToday && !showAll;
+  const departures = visibleScheduleDepartures(schedule.departures, schedule.date, now, showAll);
   const readableDate = new Intl.DateTimeFormat(getLocale(), { day: "numeric", month: "long" })
     .format(new Date(`${schedule.date}T12:00:00`));
   return (
@@ -2842,8 +2919,11 @@ function ScheduleDetails({
           <Text style={styles.dateButtonText}>→</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.detailsList}>
-        {schedule.departures.map((departure, index) => (
+      {isToday && <View style={{ marginTop: 12 }}><SegmentedChoice dark={dark} value={showAll ? "all" : "upcoming"} label="Показ розкладу"
+        options={[{ value: "upcoming", label: "Найближчі" }, { value: "all", label: "Увесь день" }]} onChange={value => setShowAll(value === "all")} /></View>}
+      <Text style={[styles.scheduleSubtitle, { marginVertical: 10 }]}>Плановий час, не прогноз прибуття.</Text>
+      <ScrollView key={`${schedule.date}-${upcomingOnly}`} contentContainerStyle={styles.detailsList}>
+        {departures.map((departure, index) => (
           <View key={`${departure.routeVariantId}-${departure.departureTimeSeconds}-${index}`} style={styles.departure}>
             <Text style={styles.departureTime}>{departure.departureTime}</Text>
             <Text style={styles.departureDestination}>{departure.destination || "Напрямок маршруту"}</Text>
@@ -2852,6 +2932,11 @@ function ScheduleDetails({
         {schedule.departures.length === 0 && (
           <Text style={styles.empty}>На цю дату планових рейсів немає або розклад ще не імпортовано.</Text>
         )}
+        {schedule.departures.length > 0 && departures.length === 0 && <View style={{ gap: 12, paddingVertical: 20 }}>
+          <Text style={styles.scheduleSubtitle}>На сьогодні планові відправлення завершилися.</Text>
+          <Pressable accessibilityRole="button" style={styles.mapButton} onPress={() => onChangeDate(addDays(schedule.date, 1))}><Text style={styles.mapButtonText}>Розклад на завтра</Text></Pressable>
+          <Pressable accessibilityRole="button" style={styles.smallAction} onPress={() => setShowAll(true)}><Text style={styles.dashboardAllLink}>Показати весь день</Text></Pressable>
+        </View>}
       </ScrollView>
       </View>
     </SafeAreaView>
@@ -3288,10 +3373,11 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   weatherFeatureAlert: { alignItems: "center", borderRadius: 9, gap: 5, justifyContent: "center", minHeight: 80, paddingHorizontal: 6, width: 80, marginLeft: 4 },
   weatherFeatureAlertCompact: { width: 64 },
   weatherFeatureAlertClear: { backgroundColor: "#dff1da" },
-  weatherFeatureAlertUnknown: { backgroundColor: COLORS.blueSurface },
+  weatherFeatureAlertUnknown: { backgroundColor: "#fff3ce" },
   weatherFeatureAlertActive: { backgroundColor: "#ffe3e0" },
   weatherFeatureAlertText: { color: "#245b31", fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, lineHeight: 14, textAlign: "center" },
   weatherFeatureAlertTextActive: { color: "#8e1b1b" },
+  weatherFeatureAlertTextUnknown: { color: "#735817" },
   weatherFeatureChevron: { position: "absolute", right: 5, top: 5 },
   airAlertBanner: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 8, marginTop: 9, minHeight: 46, paddingHorizontal: 10, paddingVertical: 7 },
   airAlertBannerClear: { backgroundColor: "#eef8eb" },
@@ -3420,10 +3506,13 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   homeNewsAllButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, paddingTop: 12 },
   homeNewsAllText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 13 },
   dashboardServicesRow: { gap: 10, paddingTop: 10, paddingRight: 4 },
-  dashboardServicesGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: PAGE_LAYOUT.gap, columnGap: "4%", paddingTop: PAGE_LAYOUT.fieldGap },
-  dashboardServiceCard: { alignItems: "center", borderColor: COLORS.border, borderRadius: 8, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 60, paddingHorizontal: 12, paddingVertical: 12, width: "48%" },
-  dashboardServiceIcon: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 7, height: 33, justifyContent: "center", width: 33 },
-  dashboardServiceTitle: { color: COLORS.ink, flex: 1, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 11, lineHeight: 15 },
+  dashboardServicesGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: PAGE_LAYOUT.fieldGap, columnGap: "4%", paddingTop: PAGE_LAYOUT.fieldGap },
+  dashboardServiceCard: { gap: 4, justifyContent: "center", minHeight: 76, padding: 10, width: "48%" },
+  dashboardServiceBody: { alignItems: "center", flexDirection: "row", gap: 6, minHeight: 28 },
+  dashboardInfoText: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 14, lineHeight: 20 },
+  dashboardServiceIcon: { borderRadius: 7, height: 24, width: 24 },
+  dashboardServiceTitle: { fontSize: 12, lineHeight: 16, minWidth: 0 },
+  dashboardServiceTestLabel: { fontSize: 11, lineHeight: 14 },
   simpleTabContent: { flexGrow: 1, paddingBottom: PAGE_LAYOUT.bottom, paddingHorizontal: PAGE_LAYOUT.gutter, paddingTop: PAGE_LAYOUT.top },
   cityKicker: { color: "#43474e", fontSize: 12, fontWeight: "700", letterSpacing: 1.1, marginTop: 20 },
   homeTitle: { color: "#071d31", fontSize: 28, fontWeight: "700", marginTop: 6 },
@@ -3530,7 +3619,7 @@ const STYLE_DEFINITIONS = StyleSheet.create({
   miniatureSummary: { color: "#596574", fontFamily: FONTS.regular, fontWeight: "400", fontSize: 12, lineHeight: 18, marginTop: 11 },
   miniatureMeta: { flexDirection: "row", flexWrap: "wrap", marginTop: 9 },
   miniatureMetaText: { color: COLORS.muted, fontFamily: FONTS.medium, fontWeight: "500", fontSize: 10 },
-  miniatureMapAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, marginTop: 12 },
+  miniatureMapAction: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 5, minHeight: 44, paddingVertical: 6, marginTop: 2 },
   miniatureMapActionText: { color: COLORS.navy, fontFamily: FONTS.semibold, fontWeight: "600", fontSize: 12 },
   miniaturesFooter: { color: COLORS.muted, fontFamily: FONTS.regular, fontWeight: "400", fontSize: 11, lineHeight: 17, marginHorizontal: 14, marginTop: 10, textAlign: "center" },
   sourceButton: { alignItems: "center", backgroundColor: COLORS.blueSurface, borderRadius: 10, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 14, minHeight: 46 },

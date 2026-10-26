@@ -1,0 +1,1239 @@
+{
+  "sourceCheckedAt": "2026-10-21T00:00:00Z",
+  "verificationNotice": "Координати з мапи MUSE Travel; на місці їх не перевіряли. Перед прогулянкою уточніть доступ до локації.",
+  "sculptures": [
+    {
+      "id": "andrii-novak",
+      "title": "Андрій Новак",
+      "latitude": 48.6193704,
+      "longitude": 22.2909454,
+      "address": "двір обласної клінічної лікарні імені Андрія Новака",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2026,
+      "summary": "Присвята лікарю Андрію Новаку розташована на території обласної лікарні. Вона нагадує про його тривалу роботу для закарпатської медицини.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://zaxid.net/v_uzhgorodi_vidkrili_miniskulpturu_likaryu_andriyu_novaku_n1640602"
+      ]
+    },
+    {
+      "id": "customs-post-4",
+      "title": "Пост №4",
+      "latitude": 48.6267031,
+      "longitude": 22.294122,
+      "address": "вул. Собранецька",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2026,
+      "summary": "Митник із собакою у маленькому будиночку представляє прикордонну професію. Мініатюра має назву «Пост №4».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "uzhhorod-union",
+      "title": "Ужгородська унія — 1646",
+      "latitude": 48.6210942,
+      "longitude": 22.3073076,
+      "address": "територія Ужгородського замку, біля руїн храму",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2026,
+      "summary": "Храм в арці та постаті священників присвячені Ужгородській унії 1646 року. Композицію встановили до її 380-річчя.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "yurii-kulchytskyi",
+      "title": "Юрій Кульчицький",
+      "latitude": 48.6143798,
+      "longitude": 22.2935146,
+      "address": "локація на туристичній мапі; вуличну адресу не уточнено",
+      "author": "Анна Немйо",
+      "installedAt": null,
+      "installedYear": 2026,
+      "summary": "Юрій Кульчицький пов’язаний із Віденською битвою та історією кави. Мініатюра продовжує міську кавову добірку.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "christmas-cricket",
+      "title": "Різдвяний цвіркун",
+      "latitude": 48.6221804,
+      "longitude": 22.2868446,
+      "address": "підземний перехід біля мосту Масарика",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2025,
+      "summary": "Цвіркун із нотами та дзвіночком присвячений різдвяній музичній темі. Об’єкт розташований у переході біля мосту.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "saint-urban",
+      "title": "Святий Урбан Лангрський",
+      "latitude": 48.6231974,
+      "longitude": 22.2993381,
+      "address": "локація на туристичній мапі; вуличну адресу не уточнено",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2025,
+      "summary": "Святий Урбан Лангрський представляє виноградарство й виноробство. Композиція присвячена покровителю цієї традиції.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "fedir-manailo",
+      "title": "Федір Манайло",
+      "latitude": 48.6256747,
+      "longitude": 22.3012306,
+      "address": "біля артпростору «Ліс»",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2025,
+      "summary": "Федір Манайло працює над візерунком на лагенарії. Мініатюра показує один із напрямів творчості закарпатського художника.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "fern-flower",
+      "title": "Цвіт папороті",
+      "latitude": 48.6207614,
+      "longitude": 22.3078787,
+      "address": "Закарпатський музей народної архітектури та побуту",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2025,
+      "summary": "Бронзова квітка переносить фольклорний образ цвіту папороті до музейного простору. Усередині композиції розміщено унгварит.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "judit-polgar",
+      "title": "Юдіт Полгар",
+      "latitude": 48.6259829,
+      "longitude": 22.2810616,
+      "address": "сквер Лаборця",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2025,
+      "summary": "Шаховий сюжет присвячений гросмейстерці Юдіт Полгар. На основі композиції поєднано поля для шахів і нард.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "maya-bee",
+      "title": "Бджілка Майя",
+      "latitude": 48.6258558,
+      "longitude": 22.3043923,
+      "address": "біля крайового будинку «Просвіта»",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Бджілка Майя пов’язує дитячу літературу з Ужгородом. Тут Спиридон Черкасенко працював над українським перекладом історії.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "vecernicek",
+      "title": "Вечернічек",
+      "latitude": 48.6235236,
+      "longitude": 22.2856928,
+      "address": "біля мосту Масарика",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Дідусь Вечернічек із собакою нагадує про словацьку вечірню телепрограму. Разом вони тримають ліхтар.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://zahid.espreso.tv/novyny-zakarpattya-v-uzhgorodi-vidkrili-pershu-u-tsomu-rotsi-mini-skulpturu-didusya-vechernichka"
+      ]
+    },
+    {
+      "id": "sisi-coffee",
+      "title": "Кава Sisi",
+      "latitude": 48.6218184,
+      "longitude": 22.2962712,
+      "address": "Київська набережна",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Імператриця Єлизавета з чашкою кави представляє кавову тему міста. Назва використовує її відоме ім’я Сісі.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "mihai-eminescu",
+      "title": "Міхай Емінеску",
+      "latitude": 48.6249661,
+      "longitude": 22.2981528,
+      "address": "провулок Гірчичне зерно",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Мініатюра румунського поета Міхая Емінеску. З університетського скверу її згодом перенесли до провулка Гірчичне зерно.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://poi.uzhgorod.ua/poi/2156"
+      ]
+    },
+    {
+      "id": "tough-nut",
+      "title": "Міцний горішок",
+      "latitude": 48.6232888,
+      "longitude": 22.2946786,
+      "address": "набережна Незалежності",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Мініатюрний горіхокол знайомить із закарпатським вирощуванням фундука та місцевою ливарною традицією.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "police-artilleryman",
+      "title": "Патрульний поліцейський-артилерист",
+      "latitude": 48.606027,
+      "longitude": 22.3098942,
+      "address": "локація на туристичній мапі; вуличну адресу не уточнено",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Фігурка поліцейського присвячена правоохоронцям, які беруть участь у захисті країни. У композиції присутні військові деталі.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "serhii-paradzhanov",
+      "title": "Сергій Параджанов",
+      "latitude": 48.621762,
+      "longitude": 22.2937898,
+      "address": "локація на туристичній мапі; вуличну адресу не уточнено",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Кінорежисер Сергій Параджанов зображений із гранатом. Кінодеталі композиції відсилають до його творчості.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "simon-hollosy",
+      "title": "Шимон Голлоші",
+      "latitude": 48.6200777,
+      "longitude": 22.3000481,
+      "address": "Православна набережна",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Шимон Голлоші представлений як художник і педагог. Його школа живопису вплинула на мистецьке середовище Закарпаття.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "shchedryk",
+      "title": "Щедрик",
+      "latitude": 48.6246265,
+      "longitude": 22.2884234,
+      "address": "локація на туристичній мапі; вуличну адресу не уточнено",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Микола Леонтович і птахи на годівничці присвячені «Щедрику». Дзвіночок нагадує про міжнародне життя цієї мелодії.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "rotary",
+      "title": "Rotary",
+      "latitude": 48.6223064,
+      "longitude": 22.2988349,
+      "address": "площа Театральна",
+      "author": "Ян-Павло Роман",
+      "installedAt": null,
+      "installedYear": 2024,
+      "summary": "Присвята ротарійському руху відзначає діяльність волонтерської клубної спільноти та історію місцевого Ротарі Клубу.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures"
+      ]
+    },
+    {
+      "id": "ekskursovod",
+      "title": "Екскурсовод",
+      "latitude": 48.6201875,
+      "longitude": 22.3046875,
+      "address": "вул. Івана Ольбрахта, 6, біля ботанічного саду",
+      "author": "Роман Мурник",
+      "installedAt": "2023-10-24",
+      "installedYear": 2023,
+      "summary": "Провідник на гірській основі присвячений закарпатським гідам, зокрема загиблим захисникам. Його образ пов’язаний із Тарасом Гайдуком.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "laszlo-biro",
+      "title": "Ласло Біро",
+      "latitude": 48.621205,
+      "longitude": 22.297784,
+      "address": "пішохідний міст",
+      "author": "Роман Мурник",
+      "installedAt": "2023-12-06",
+      "installedYear": 2023,
+      "summary": "Рука з ручкою нагадує про Ласло Біро та розвиток кулькових ручок. Це мініатюра про знайомий щоденний винахід.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "legendy-zamkiv",
+      "title": "Легенди Закарпатських замків",
+      "latitude": 48.6211875,
+      "longitude": 22.3079375,
+      "address": "бастіон Ужгородського замку",
+      "author": "Роман Мурник",
+      "installedAt": "2023-09-09",
+      "installedYear": 2023,
+      "summary": "Композиція збирає персонажів закарпатських замкових переказів. Її варто розглядати як художню розповідь, а не історичний документ.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "motsko",
+      "title": "Моцко",
+      "latitude": 48.6219375,
+      "longitude": 22.3043125,
+      "address": "вул. Капітульна, біля дитячого садка №6",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2023,
+      "summary": "Ведмедик Моцко знайомий глядачам угорської «Вечірньої казки». Фігурка нагадує про спільні телевізійні спогади мешканців краю.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "nandor-ploteni",
+      "title": "Нандор Плотені",
+      "latitude": 48.621291,
+      "longitude": 22.297731,
+      "address": "біля пішохідного мосту",
+      "author": "Роман Мурник",
+      "installedAt": "2023-12-13",
+      "installedYear": 2023,
+      "summary": "Скрипаль Нандор Плотені тримає незвичайну велику скрипку. Мініатюра доповнює музичні присвяти на набережній.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "porajmos",
+      "title": "Пораймос",
+      "latitude": 48.6341875,
+      "longitude": 22.3068125,
+      "address": "подвір’я Ужгородської гімназії №14",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2023,
+      "summary": "Колесо з постатями людей присвячене пам’яті жертв Голокосту ромів. Це меморіальний об’єкт на шкільній території.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "uzhanska-rusalonka",
+      "title": "Ужанська русалонька",
+      "latitude": 48.6214375,
+      "longitude": 22.2979375,
+      "address": "центральна опора пішохідного мосту",
+      "author": "Роман Мурник",
+      "installedAt": "2023-08-11",
+      "installedYear": 2023,
+      "summary": "Русалонька над Ужем поєднує казковий образ із міською річкою. Шукайте її біля центральної опори мосту.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "alma-mater",
+      "title": "Alma Mater",
+      "latitude": 48.6353125,
+      "longitude": 22.2909375,
+      "address": "вул. Університетська, 14",
+      "author": "Роман Мурник",
+      "installedAt": "2023-09-01",
+      "installedYear": 2023,
+      "summary": "Сова на книзі присвячена університетському навчанню. На постаменті обіграно вислів про «граніт науки».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "castrum-ung",
+      "title": "Castrum Ung",
+      "latitude": 48.6213125,
+      "longitude": 22.3084375,
+      "address": "вул. Підградська, 40",
+      "author": "Ян-Павло Роман",
+      "installedAt": "2023-09-10",
+      "installedYear": 2023,
+      "summary": "Мініатюрна фортеця на руків’ї меча відсилає до давнього Унгвара. Композиція стоїть біля підніжжя замкової гори.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "suitcase-2022",
+      "title": "Валіза 2022 року",
+      "latitude": 48.6095625,
+      "longitude": 22.3004375,
+      "address": "залізничний вокзал Ужгорода",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2022,
+      "summary": "Кам’яна валіза з дитячою іграшкою присвячена переселенцям і людям залізниці, які допомагали евакуації під час війни.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "zakarpattia-champions",
+      "title": "Закарпатські чемпіони",
+      "latitude": 48.6220625,
+      "longitude": 22.2790625,
+      "address": "Київська набережна, позначка на мапі",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2022,
+      "summary": "Гравець американського футболу присвячений команді «Ужгородські лісоруби». Основою композиції став спортивний шолом.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/",
+        "https://zaxid.net/mini_skulpturu_gravtsya_amerikanskogo_futbolu_vstanovili_v_uzhgorodi_n1548515"
+      ]
+    },
+    {
+      "id": "krtchek",
+      "title": "Кртчек",
+      "latitude": 48.6235625,
+      "longitude": 22.2859375,
+      "address": "міст Масарика",
+      "author": "Роман Мурник",
+      "installedAt": "2022-07-15",
+      "installedYear": 2022,
+      "summary": "Кротик із мультфільмів Зденека Мілера оселився біля мосту Масарика. У ньому впізнають героя чеської анімації.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "nashi-kozaky",
+      "title": "Наші козаки",
+      "latitude": 48.6245625,
+      "longitude": 22.2959375,
+      "address": "альпінарій біля художнього музею",
+      "author": "Роман Мурник",
+      "installedAt": "2022-10-14",
+      "installedYear": 2022,
+      "summary": "Троє анімаційних козаків отримали сучасне військове спорядження. Числа на фігурках відсилають до 128-ї бригади.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "professor-in-trench",
+      "title": "Професор з окопу",
+      "latitude": 48.6219054,
+      "longitude": 22.2986875,
+      "address": "перила біля лялькового театру, площа Театральна",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2022,
+      "summary": "Професор із ноутбуком уособлює Федора Шандора, який викладав із фронту. У 2025 році скульптуру перенесли до лялькового театру.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/",
+        "https://poi.uzhgorod.ua/poi/2108"
+      ]
+    },
+    {
+      "id": "horyany-rotunda",
+      "title": "Горянська Ротонда",
+      "latitude": 48.6061875,
+      "longitude": 22.3370625,
+      "address": "Горяни, провулок Музейний, 2",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2021,
+      "summary": "Бронзова модель Горянської ротонди стоїть поряд із самим храмом. Вона дозволяє роздивитися його форму в мініатюрі.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "wild-west",
+      "title": "Дикий Захід",
+      "latitude": 48.6224375,
+      "longitude": 22.2886875,
+      "address": "Київська набережна, біля будинку №20",
+      "author": "Емма Русин",
+      "installedAt": null,
+      "installedYear": 2021,
+      "summary": "Вестерн-сюжет нагадує про гастролі шоу Баффало Білла в Ужгороді у 1906 році. Авторка — Емма Русин.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "laszlo-bodi",
+      "title": "Ласло Боді",
+      "latitude": 48.6238125,
+      "longitude": 22.2925625,
+      "address": "площа Малий Ґалаґов, 3",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2021,
+      "summary": "Ласло Боді, відомий як Cipő, народився в Ужгороді. Мініатюра присвячена вокалісту й автору пісень гурту Republic.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "uzhhorod-cake",
+      "title": "Торт «Ужгород»",
+      "latitude": 48.6223125,
+      "longitude": 22.3006875,
+      "address": "вул. Августина Волошина, 32",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2021,
+      "summary": "Мініатюра торта «Ужгород» знайомить із місцевим десертом Валентина Штефаньо. Ще одна зупинка для гастрономічного маршруту.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "druhet",
+      "title": "Другет",
+      "latitude": 48.6248125,
+      "longitude": 22.3025625,
+      "address": "біля колишньої гімназії Другетів, район площі Корятовича",
+      "author": "Степан Руснак та Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Мініатюра нагадує про рід Другетів та його роль в історії Ужгорода й замкових володінь.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "zakarpattia-kiflyk",
+      "title": "Закарпатський кіфлик",
+      "latitude": 48.6335625,
+      "longitude": 22.2798125,
+      "address": "вул. Собранецька, 89, біля ТЦ «Дастор»",
+      "author": "Степан Руснак та Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Бронзовий кіфлик відтворює місцеве печиво у формі півмісяця. Це одна з гастрономічних мініатюр міста.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "uzhhorod-pearl",
+      "title": "Іштван Дєньдєші — перлина Ужгорода",
+      "latitude": 48.6120625,
+      "longitude": 22.3181875,
+      "address": "Радванка, біля найстарішого житлового будинку міста",
+      "author": "Роман Мурник та Степан Руснак",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Перлина присвячена поету Іштвану Дєньдєші. Її форма обігрує значення його прізвища.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "coffee-roaster",
+      "title": "Кавовий ростер",
+      "latitude": 48.6221875,
+      "longitude": 22.2989375,
+      "address": "площа Євгена Фенцика, біля кав’ярні Riverside",
+      "author": "Андрій Возницький",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Мініатюрний апарат для обсмажування зерен представляє кавову традицію Ужгорода. Автор роботи — Андрій Возницький.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "saint-stephen-crown",
+      "title": "Корона св. Іштвана",
+      "latitude": 48.6201375,
+      "longitude": 22.2996094,
+      "address": "Православна набережна, біля угорського консульства",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Копія корони святого Іштвана лежить на подушці. Композиція нагадує про перебування реліквії на Закарпатті.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "milton-friedman",
+      "title": "Мілтон Фрідман",
+      "latitude": 48.6273125,
+      "longitude": 22.2903125,
+      "address": "вул. Юрія Гойди",
+      "author": "Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Присвята економісту Мілтону Фрідману нагадує про закарпатське походження його родини. Він став лауреатом Нобелівської премії з економіки.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "tomas-masaryk",
+      "title": "Томаш Масарик",
+      "latitude": 48.6241875,
+      "longitude": 22.2905625,
+      "address": "набережна Незалежності, 19, біля школи №3",
+      "author": "Роман Мурник та Степан Руснак",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Томаш Масарик представляє чехословацький період міста. Фігурку встановили біля школи, пов’язаної з його підтримкою.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "ferenc-kolcsey",
+      "title": "Ференц Келчеї",
+      "latitude": 48.6149375,
+      "longitude": 22.3011875,
+      "address": "вул. Мукачівська, 54",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2019,
+      "summary": "Автор слів угорського гімну Ференц Келчеї зображений біля Угорського дому. Мініатюра доповнює літературні місця міста.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/",
+        "https://go-to.rest/blog/mini-skulptura-ugorskogo-poeta-ferenca-kelchei/"
+      ]
+    },
+    {
+      "id": "istvan-laudon",
+      "title": "Іштван Лаудон",
+      "latitude": 48.6260625,
+      "longitude": 22.2928125,
+      "address": "вул. Ференца Ракоці, 3, дендросад Лаудона",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2018,
+      "summary": "Натураліст Іштван Лаудон залишив місту колекцію екзотичних дерев. Мініатюра біля саду знайомить із його засновником.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "meteorite-knyahynia",
+      "title": "Метеорит «Княгиня»",
+      "latitude": 48.6198125,
+      "longitude": 22.2955625,
+      "address": "площа Шандора Петефі",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2018,
+      "summary": "Модель метеорита нагадує про падіння «Княгині» на Закарпатті у 1866 році. Це астрономічна зупинка міської прогулянки.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "napoleon",
+      "title": "Наполеон",
+      "latitude": 48.5950625,
+      "longitude": 22.3145625,
+      "address": "вул. Коритнянська, територія пекарні «Дік»",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2018,
+      "summary": "Фігурка Наполеона розташована біля пекарні. Її сюжет поєднує історичну постать із назвою популярного десерту.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "ferenc-erkel",
+      "title": "Ференц Еркель",
+      "latitude": 48.6195625,
+      "longitude": 22.2958125,
+      "address": "площа Шандора Петефі, 20",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2018,
+      "summary": "Присвята Ференцу Еркелю розташована біля школи мистецтв. Композитор відомий розвитком угорської опери.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "janos-arany",
+      "title": "Янош Арань",
+      "latitude": 48.6352146,
+      "longitude": 22.2906556,
+      "address": "вул. Університетська, 14, головний корпус УжНУ",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2018,
+      "summary": "Мініатюра угорського поета Яноша Араня пов’язана з університетською філологічною традицією. У 2025 році її перенесли до головного корпусу.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "swan-lake",
+      "title": "Лебедине озеро",
+      "latitude": 48.6221875,
+      "longitude": 22.2869375,
+      "address": "Київська набережна, біля мосту Масарика",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2017,
+      "summary": "Старий телевізор із балетним сюжетом нагадує про роль телебачення в суспільній пам’яті.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "hallom",
+      "title": "Hallom",
+      "latitude": 48.6236875,
+      "longitude": 22.2950625,
+      "address": "площа Поштова, біля головпоштамту",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2017,
+      "summary": "Телефонна мініатюра присвячена винахіднику Тівадару Пушкашу та історії зв’язку. Її назва угорською означає «чую».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "hasta-la-vista-lenin",
+      "title": "Hasta la vista, Lenin",
+      "latitude": 48.6091875,
+      "longitude": 22.2986875,
+      "address": "район залізничного вокзалу",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2017,
+      "summary": "Маленький вагон із бюстом Леніна осмислює прощання з радянською добою. Це сатиричний міський об’єкт.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "liberty-bell",
+      "title": "Liberty Bell",
+      "latitude": 48.6248125,
+      "longitude": 22.2966875,
+      "address": "площа Жупанатська, перед художнім музеєм",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2017,
+      "summary": "Дзвін і постать Григорія Жатковича поєднують американський символ свободи з історією першого губернатора Підкарпатської Русі.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "ato-soldiers",
+      "title": "Воїни АТО",
+      "latitude": 48.6230625,
+      "longitude": 22.2946875,
+      "address": "набережна Незалежності, 9, біля пам’ятника Августину Волошину",
+      "author": "Автор не оприлюднений",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Невеликі фігурки воїнів присвячені захисникам України. Автор роботи залишився неназваним.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "yedyna",
+      "title": "Єдина",
+      "latitude": 48.6245625,
+      "longitude": 22.2955625,
+      "address": "площа Поштова, кам’яний мур",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Обрис України виконаний як плитка шоколаду. Композиція присвячена незалежності та цілісності країни.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "prince-laborets",
+      "title": "Князь Лаборець",
+      "latitude": 48.6210625,
+      "longitude": 22.3056875,
+      "address": "вул. Капітульна, біля входу до Ужгородського замку",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Меч із постаттю князя відсилає до легенди про Лаборця. Мініатюру слід сприймати як художній образ міського переказу.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "kukots",
+      "title": "Кукоц",
+      "latitude": 48.6215844,
+      "longitude": 22.299435,
+      "address": "Ботанічна набережна, біля філармонії",
+      "author": "Михайло Колодко; відновлення — Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Черв’ячок Кукоц — персонаж угорської анімації. Після пошкодження мініатюру відновили й розмістили на новому місці.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "tivadar-csontvary",
+      "title": "Тівадар Чонтварі",
+      "latitude": 48.6211875,
+      "longitude": 22.2980625,
+      "address": "Православна набережна, біля пішохідного мосту",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Художник Тівадар Чонтварі постав у несподіваному образі ковзаняра. Локацію фігурки змінювали у 2023 році.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "hanukkiah",
+      "title": "Ханукія",
+      "latitude": 48.6215596,
+      "longitude": 22.2994783,
+      "address": "біля філармонії, колишньої синагоги",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2016,
+      "summary": "Мініатюрний ханукальний світильник нагадує про єврейську історію Ужгорода. Місце поруч із колишньою синагогою підсилює цей зв’язок.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "amadeus-mozart",
+      "title": "Амадей Моцарт",
+      "latitude": 48.6233125,
+      "longitude": 22.2996875,
+      "address": "вул. Августина Волошина, 11, двір музичної школи",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Невеликий Моцарт захований у музичному дворі. Відвідування залежить від доступу до території школи.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "bela-bartok",
+      "title": "Бейла Барток",
+      "latitude": 48.6203125,
+      "longitude": 22.2996875,
+      "address": "Православна набережна, біля угорського консульства",
+      "author": "Михайло Колодко; відновлення — Роман Мурник",
+      "installedAt": "2015-09-25",
+      "installedYear": 2015,
+      "summary": "Мініатюра присвячена композитору й досліднику народної музики Бейлі Бартоку. Нинішню фігурку встановили після втрати попередньої.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "vynoliub",
+      "title": "Винолюб",
+      "latitude": 48.6205625,
+      "longitude": 22.3049375,
+      "address": "вул. Івана Ольбрахта, територія Центру гунгарології УжНУ",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Постаті на винній бочці присвячено закарпатське виноробство. У композиції помітне гроно винограду.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "harry-houdini",
+      "title": "Гаррі Гудіні",
+      "latitude": 48.6214375,
+      "longitude": 22.2869375,
+      "address": "площа Богдана Хмельницького, перед готелем «Ужгород»",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Гаррі Гудіні уособлює мистецтво звільнення від пут. Металева основа композиції підтримує цей задум.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "eiffel-tower",
+      "title": "Ейфелева вежа",
+      "latitude": 48.6229375,
+      "longitude": 22.3016875,
+      "address": "вул. Капітульна, 9, біля перетину з вул. Духновича",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Крихітна Ейфелева вежа доповнює старовинний міський ліхтар. Це французький акцент у кварталі біля собору.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "michael-strank",
+      "title": "Майкл Стренк",
+      "latitude": 48.6259375,
+      "longitude": 22.2964375,
+      "address": "ліцей №4, вхід із боку вул. Тихої / Жупанатської",
+      "author": "Михайло Колодко",
+      "installedAt": "2015-02-17",
+      "installedYear": 2015,
+      "summary": "Присвята морському піхотинцю Майклу Стренку, одному з учасників відомого підняття прапора на Іодзімі.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "malyi-uzh",
+      "title": "Малий Уж",
+      "latitude": 48.6250625,
+      "longitude": 22.2981875,
+      "address": "вул. Олександра Фединця, біля провулка Гірчичне зерно",
+      "author": "Михайло Колодко",
+      "installedAt": "2015-02-07",
+      "installedYear": 2015,
+      "summary": "Дві металеві рибини нагадують про Великий і Малий Уж. Рукав Малий Уж колись проходив через центр міста.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "manneken-pis",
+      "title": "Маннекен піс",
+      "latitude": 48.6424375,
+      "longitude": 22.3104375,
+      "address": "вул. Дитяча, 1Г, біля ресторану «Кілікія»",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Місцева інтерпретація брюссельського хлопчика є частиною композиції питного фонтану біля «Кілікії».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "mykola-shuhai",
+      "title": "Микола Шугай",
+      "latitude": 48.6206875,
+      "longitude": 22.3038125,
+      "address": "вул. Івана Ольбрахта, 3",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Опришок Микола Шугай став героєм літератури й цієї міської мініатюри. Його фігурка розташована біля кав’ярні «Під замком».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "bercheni-chaki",
+      "title": "Міклош Берчені та Крістіна Чакі",
+      "latitude": 48.6209375,
+      "longitude": 22.2986875,
+      "address": "Православна набережна, біля угорського консульства",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Міклош Берчені та Крістіна Чакі представлені разом. Подружжя пов’язане з історією Ужгородського замку.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "al-idrisi",
+      "title": "Мухаммад аль-Ідрісі",
+      "latitude": 48.6240625,
+      "longitude": 22.2980625,
+      "address": "вул. Корятовича, 1, біля книгарні «Кобзар»",
+      "author": "Михайло Колодко; відновлення — Роман Мурник",
+      "installedAt": null,
+      "installedYear": 2015,
+      "summary": "Мандрівник і географ аль-Ідрісі сидить за маленьким столом. Пам’ятка пов’язує історію міста з картографією.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "vuzol-krotona",
+      "title": "Вузол Кротона",
+      "latitude": 48.6215625,
+      "longitude": 22.2968125,
+      "address": "Київська набережна, неподалік Швейка",
+      "author": "Василь Криванич",
+      "installedAt": null,
+      "installedYear": 2014,
+      "summary": "Зав’язані металеві перила нагадують про закарпатського атлета Івана Фірцака, відомого як Іван Сила.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptura-vuzol-krotona/"
+      ]
+    },
+    {
+      "id": "john-lord",
+      "title": "Джон Лорд",
+      "latitude": 48.6225625,
+      "longitude": 22.2968125,
+      "address": "набережна Незалежності, біля будинку №4",
+      "author": "Михайло Колодко; відновлення — Роман Мурник",
+      "installedAt": "2014-11-27",
+      "installedYear": 2014,
+      "summary": "Музична зупинка на набережній присвячена клавішнику Deep Purple Джону Лорду. Після втрати оригіналу композицію відновили.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "andy-warhol",
+      "title": "Енді Воргол",
+      "latitude": 48.6253125,
+      "longitude": 22.2965625,
+      "address": "площа Жупанатська, ворота біля художнього музею",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2014,
+      "summary": "Енді Воргол тримає камеру й дивиться на місто. Мініатюра знайомить із митцем, чиє коріння пов’язане з Карпатами.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "rubiks-cube",
+      "title": "Кубик Рубіка",
+      "latitude": 48.621248,
+      "longitude": 22.2977858,
+      "address": "Консульські сходи біля пішохідного мосту",
+      "author": "Михайло Колодко",
+      "installedAt": null,
+      "installedYear": 2014,
+      "summary": "Бронзова головоломка нагадує про винахід Ерне Рубіка. Шукайте її на перилах поруч зі Свободкою.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "ihlavski-yizhachky",
+      "title": "Їглавські їжачки",
+      "latitude": 48.6222868,
+      "longitude": 22.2940043,
+      "address": "Київська набережна",
+      "author": "Михайло Колодко",
+      "installedAt": "2013-05-26",
+      "installedYear": 2013,
+      "summary": "Їжачки представляють чеське місто Їглава й нагадують про його побратимські зв’язки з Ужгородом.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "karpatiia",
+      "title": "Карпатія",
+      "latitude": 48.6220625,
+      "longitude": 22.2980625,
+      "address": "площа Театральна, біля Миколайчика",
+      "author": "Михайло Колодко",
+      "installedAt": "2013-04-15",
+      "installedYear": 2013,
+      "summary": "Модель пароплава Carpathia присвячена судну, яке прийняло врятованих пасажирів «Титаніка».",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "orienteer",
+      "title": "Спортивний орієнтувальник",
+      "latitude": 48.6220625,
+      "longitude": 22.2950625,
+      "address": "Київська набережна",
+      "author": "Василь Бедрик",
+      "installedAt": null,
+      "installedYear": 2013,
+      "summary": "Спортсмени з картою представляють орієнтування на місцевості. Оновлену версію композиції відкрили у 2023 році.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "svejk",
+      "title": "Бравий солдат Швейк",
+      "latitude": 48.6214375,
+      "longitude": 22.2973125,
+      "address": "Київська набережна, біля пішохідного мосту",
+      "author": "Михайло Колодко",
+      "installedAt": "2012-07-10",
+      "installedYear": 2012,
+      "summary": "Персонаж Ярослава Гашека спостерігає за Ужем із перил. У його руках можна розгледіти кнедлик і шапку.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "havrylo-hliuk",
+      "title": "Гаврило Глюк",
+      "latitude": 48.6258125,
+      "longitude": 22.3028125,
+      "address": "вул. Вакарова, 7, площа Гаврила Глюка",
+      "author": "Михайло Колодко",
+      "installedAt": "2012-11-02",
+      "installedYear": 2012,
+      "summary": "Художник Гаврило Глюк сидить за кермом автомобіля. Мольберт позаду підказує, куди прямує його творча подорож.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "ferenc-liszt",
+      "title": "Ференц Ліст",
+      "latitude": 48.6240625,
+      "longitude": 22.2973125,
+      "address": "площа Жупанатська, біля перетину вулиць Фединця та Довженка",
+      "author": "Михайло Колодко",
+      "installedAt": "2012-05-07",
+      "installedYear": 2012,
+      "summary": "Ференц Ліст зображений із валізою. Фігурку композитора перенесли з набережної до історичного центру.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "mayak-ungvar",
+      "title": "Свободка — маяк Унгвар",
+      "latitude": 48.6212821,
+      "longitude": 22.2978167,
+      "address": "Православна набережна, Консульські сходи",
+      "author": "Михайло Колодко",
+      "installedAt": "2011-07-27",
+      "installedYear": 2011,
+      "summary": "Ужгородська версія статуї Свободи поєднує міський символ із маленьким маяком для регати.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    },
+    {
+      "id": "mikolaychyk",
+      "title": "Миколайчик",
+      "latitude": 48.6220625,
+      "longitude": 22.2981875,
+      "address": "площа Театральна, перила біля Ужа",
+      "author": "Михайло Колодко",
+      "installedAt": "2010-12-19",
+      "installedYear": 2010,
+      "summary": "Мініатюрний помічник святого Миколая біля річки. Саме з цієї фігурки почалася ужгородська колекція.",
+      "sourceUrls": [
+        "https://muse-travel.com/mini-sculptures",
+        "https://go-to.rest/location/transcarpathia/uzhhorod/mini-skulptury/"
+      ]
+    }
+  ]
+}

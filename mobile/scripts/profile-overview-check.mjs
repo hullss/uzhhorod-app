@@ -5,7 +5,7 @@ import vm from "node:vm";
 function load(path, mocks) {
   const exports = {};
   const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  vm.runInNewContext(code, { exports, Date, Promise, JSON, require: name => { assert.ok(name in mocks, name); return mocks[name]; } });
+  vm.runInNewContext(code, { exports, Date, Promise, JSON, require: name => { assert.ok(name in mocks, name); return name === "react-native" ? { ...mocks[name], StyleSheet: { create: value => value, hairlineWidth: 0.5 } } : mocks[name]; } });
   return exports;
 }
 const jsx = (type, props) => ({ type, props });
@@ -23,19 +23,30 @@ const common = { "react/jsx-runtime": { jsx, jsxs: jsx }, "react-native": { View
 const profileHooks = hooks(); let failAddress = false, failAppointments = false;
 const overview = load("../src/components/ProfileOverviewScreen.tsx", { ...common, react: profileHooks.react, "../ui/fonts": { APP_FONTS: { semibold: "System" } }, "../power/model": { addressKey: item => item.key, addressLabel: item => item.label },
   "../storage/powerAddress": { restoreAddressBook: async () => { if (failAddress) throw Error(); return { defaultKey: "home", addresses: [{ key: "other", label: "Other place" }, { key: "home", label: "Ужгород, Оноківська, 5" }] }; } },
-  "../storage/demoCivic": { restoreAppointments: async () => { if (failAppointments) throw Error(); return [{ upcoming: true }, { upcoming: false }]; } }, "../civic/demoCivic": { isUpcoming: item => item.upcoming } });
+  "../storage/demoCivic": { restoreAppointments: async () => { if (failAppointments) throw Error(); return [{ upcoming: true, date: "2026-10-26", time: "11:00" }, { upcoming: false, date: "2026-10-01", time: "09:00" }]; } }, "../civic/demoCivic": { isUpcoming: item => item.upcoming, dateLabel: date => date } });
 let props = { dark: true, name: "Вадим", email: "qa@example.test", card: { label: "Моя картка", last4: "4242" }, ticketCount: 3, favoriteCount: 2, footer: "tabs" };
 const actions = [];
-for (const key of ["Personal", "Settings", "Account", "Addresses", "Cards", "Tickets", "Appointments", "Favorites"]) props[`on${key}`] = () => actions.push(key);
+for (const key of ["Personal", "Settings", "Account", "Addresses", "Cards", "Tickets", "Appointments", "Favorites", "Power", "Polls", "HomeServices"]) props[`on${key}`] = () => actions.push(key);
 function profile() { profileHooks.start(); const tree = overview.ProfileOverviewScreen(props); profileHooks.flush(); return tree; }
 let tree = profile(); await new Promise(setImmediate); tree = profile();
 assert.ok(nodes(tree).some(node => node.props?.children === "Ужгород, Оноківська, 5"));
 assert.ok(nodes(tree).some(node => node.props?.children === "Моя картка · •••• 4242"));
-for (const label of ["Особисті дані", "Налаштування", "Мої адреси", "Картки", "Мої квитки", "Мої записи до ЦНАП", "Обране"]) {
+for (const label of ["Особисті дані", "Налаштування", "Адреси", "Способи оплати", "Квитки", "Записи до ЦНАП", "Обране"]) {
   const row = nodes(tree).find(node => node.type === "Button" && node.props.accessibilityLabel === label);
   assert.ok(row, label); assert.ok(row.props.style?.minHeight >= 44 || row.props.style?.minWidth >= 44 || row.props.style?.minHeight === 48); row.props.onPress();
 }
 assert.deepEqual(actions, ["Personal", "Settings", "Addresses", "Cards", "Tickets", "Appointments", "Favorites"]);
+assert.equal(nodes(tree).find(node => node.props?.accessibilityLabel === "Записи до ЦНАП").props.accessibilityValue.text, "1");
+assert.ok(nodes(tree).some(node => node.props?.children === "2026-10-26 · 11:00"));
+for (const label of ["Світло за адресою", "Мої сервіси", "Опитування"]) nodes(tree).find(node => node.type === "Button" && node.props.accessibilityLabel === label).props.onPress();
+assert.deepEqual(actions.slice(-3), ["Power", "HomeServices", "Polls"]);
+const profileStyles = overview.profileOverviewStyles(true);
+assert.equal(profileStyles.group.borderWidth ?? 0, 0);
+assert.equal(profileStyles.row.height, undefined);
+assert.equal(profileStyles.name.numberOfLines, undefined);
+assert.ok(profileStyles.name.fontSize > profileStyles.rowTitle.fontSize);
+assert.equal(nodes(tree).find(node => node.props?.accessibilityLabel === "Квитки").props.accessibilityValue.text, "3");
+assert.equal(nodes(tree).find(node => node.props?.accessibilityLabel === "Адреси").props.accessibilityHint, "Ужгород, Оноківська, 5");
 assert.ok(!nodes(tree).some(node => node.props?.children === "Про застосунок" || node.props?.children === "Правила та приватність" || node.props?.name === "person-circle-outline"));
 assert.ok(!nodes(tree).some(node => node.props?.accessibilityLabel === "Увійти"));
 props = { ...props, email: undefined, name: "", card: null }; tree = profile();

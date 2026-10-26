@@ -66,15 +66,45 @@ export const CITY_POLL = {
     { id: "accessibility", title: "Безбар’єрність міста" },
   ],
 } as const;
+export const CITY_POLLS = [CITY_POLL, {
+  id: "transport-comfort-v1", title: "Що зробить поїздки містом зручнішими?",
+  description: "Оберіть одну зміну, яку ви хотіли б бачити у громадському транспорті. Це тестове опитування; відповідь не надсилається місту.",
+  options: [
+    { id: "evening", title: "Більше вечірніх рейсів" },
+    { id: "arrival", title: "Точніший час прибуття на зупинках" },
+    { id: "accessible", title: "Доступні автобуси й зупинки" },
+    { id: "payment", title: "Зручна безготівкова оплата" },
+  ],
+}, {
+  id: "city-spaces-v1", title: "Чого бракує у вашому районі?",
+  description: "Яке покращення громадського простору було б найкориснішим? Це тестове опитування, а не затверджений план міських робіт.",
+  options: [
+    { id: "lighting", title: "Освітлення пішохідних доріжок" },
+    { id: "shade", title: "Дерева та затінок" },
+    { id: "benches", title: "Лавки й місця для відпочинку" },
+    { id: "bins", title: "Контейнери для сортування" },
+  ],
+}, {
+  id: "digital-services-v1", title: "Який цифровий сервіс додати наступним?",
+  description: "Допоможіть обрати напрям розвитку прототипу. Ваш вибір збережеться лише на цьому пристрої.",
+  options: [
+    { id: "outages", title: "Сповіщення про відключення за адресою" },
+    { id: "appeals", title: "Звернення про міські проблеми" },
+    { id: "events", title: "Персональна добірка подій" },
+    { id: "walks", title: "Прогулянкові маршрути містом" },
+  ],
+}] as const;
+export type CityPoll = typeof CITY_POLLS[number];
 export type PollVote = { pollId: string; optionId: string; votedAt: string };
 export function isPollVote(value: unknown): value is PollVote {
   if (!value || typeof value !== "object") return false;
   const item = value as PollVote;
-  return item.pollId === CITY_POLL.id && CITY_POLL.options.some((option) => option.id === item.optionId)
+  return CITY_POLLS.some(poll => poll.id === item.pollId && poll.options.some(option => option.id === item.optionId))
     && typeof item.votedAt === "string" && Number.isFinite(Date.parse(item.votedAt));
 }
-export function createVote(optionId: string, existing: PollVote | null, now = new Date()): PollVote {
-  if (existing) throw new Error("Ви вже проголосували в цьому опитуванні.");
-  if (!CITY_POLL.options.some((option) => option.id === optionId)) throw new Error("Оберіть варіант відповіді.");
-  return { pollId: CITY_POLL.id, optionId, votedAt: now.toISOString() };
+export function createVote(optionId: string, existing: PollVote | null, now = new Date(), pollId: string = CITY_POLL.id): PollVote {
+  if (existing?.pollId === pollId) throw new Error("Ви вже проголосували в цьому опитуванні.");
+  const poll = CITY_POLLS.find(item => item.id === pollId);
+  if (!poll?.options.some(option => option.id === optionId)) throw new Error("Оберіть варіант відповіді.");
+  return { pollId, optionId, votedAt: now.toISOString() };
 }

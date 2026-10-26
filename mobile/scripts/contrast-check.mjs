@@ -68,6 +68,12 @@ for (const mode of ["light", "dark"]) for (const [text, surface] of resolvedPair
   assert.ok(ratio(foreground, background) >= 4.5, `${mode}: ${text}/${surface}: ${ratio(foreground, background).toFixed(2)}:1`);
 }
 console.log("PASS: actual app styles in both themes: headers, descriptions, route names/numbers and text above map");
+for (const mode of ["light", "dark"]) {
+  const s = context.exports[mode];
+  assert.ok(ratio(s.weatherFeatureAlertTextUnknown.color, s.weatherFeatureAlertUnknown.backgroundColor) >= 4.5, `${mode}: yellow unknown alert must stay readable`);
+  assert.notEqual(s.weatherFeatureAlertUnknown.backgroundColor, s.weatherFeatureAlertClear.backgroundColor);
+}
+console.log("PASS: unknown alert has a distinct yellow surface and readable text in both themes");
 
 function actualFunction(path, name) {
   const ast = ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -93,3 +99,19 @@ for (const dark of [false, true]) {
   for (const [foreground, background] of actualPairs) assert.ok(ratio(foreground, background) >= 4.5, `${dark ? "dark" : "light"} actual service contrast: ${foreground}/${background}`);
 }
 console.log("PASS: 40 actual civic/payment text/background pairs, including errors, secondary/disabled actions and receipt warnings");
+
+vm.runInNewContext(ts.transpileModule([
+  actualFunction("../src/components/ProfileOverviewScreen.tsx", "profileOverviewStyles"),
+  "exports.profile = profileOverviewStyles;",
+].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, serviceContext);
+for (const dark of [false, true]) {
+  const p = serviceContext.exports.profile(dark); const c = tokens.exports.themeTokens(dark);
+  for (const [foreground, background] of [[p.name.color, c.bg], [p.email.color, c.bg],
+    [p.eyebrow.color, c.bg], [p.sectionTitle.color, c.bg], [p.rowTitle.color, p.group.backgroundColor],
+    [p.detail.color, p.group.backgroundColor], [p.countText.color, p.count.backgroundColor]]) {
+    assert.ok(ratio(foreground, background) >= 4.5, `${dark ? "dark" : "light"} profile contrast: ${foreground}/${background}`);
+  }
+  assert.equal(p.group.borderWidth ?? 0, 0);
+  assert.ok(p.row.minHeight >= 44 && p.edit.minHeight >= 44 && p.settings.minHeight >= 44);
+}
+console.log("PASS: actual profile text, metadata and counts meet 4.5:1 in both themes; quiet groups have no outlines and actions retain 44px targets");

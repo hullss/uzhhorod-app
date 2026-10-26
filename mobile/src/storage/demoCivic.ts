@@ -1,6 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { isAppointment, isPollVote, MAX_APPOINTMENTS, type Appointment, type PollVote } from "../civic/demoCivic";
+import { CITY_POLL, CITY_POLLS, isAppointment, isPollVote, MAX_APPOINTMENTS, type Appointment, type PollVote } from "../civic/demoCivic";
 
 const APPOINTMENTS_KEY = "uzhhorod-digital.cnap.v1";
 const VOTE_KEY = "uzhhorod-digital.poll-v1";
@@ -35,12 +35,18 @@ export function persistAppointments(items: Appointment[]): Promise<void> {
   return write(APPOINTMENTS_KEY, items.slice(0, MAX_APPOINTMENTS).map(({ id, serviceId, centerId, date, time, createdAt, cancelledAt }) =>
     ({ id, serviceId, centerId, date, time, createdAt, ...(cancelledAt ? { cancelledAt } : {}) })));
 }
-export async function restoreVote(): Promise<PollVote | null> {
-  const value = await read(VOTE_KEY);
+const voteKey = (pollId: string) => pollId === CITY_POLL.id ? VOTE_KEY : `uzhhorod-digital.poll.${pollId}`;
+export async function restoreVote(pollId: string = CITY_POLL.id): Promise<PollVote | null> {
+  const value = await read(voteKey(pollId));
   if (value === null) return null;
-  if (!isPollVote(value)) throw new Error("Не вдалося прочитати збережений голос.");
+  if (!isPollVote(value) || value.pollId !== pollId) throw new Error("Не вдалося прочитати збережений голос.");
   return value;
 }
 export function persistVote({ pollId, optionId, votedAt }: PollVote): Promise<void> {
-  return write(VOTE_KEY, { pollId, optionId, votedAt });
+  if (!isPollVote({ pollId, optionId, votedAt })) return Promise.reject(new Error("Перевірте голос."));
+  return write(voteKey(pollId), { pollId, optionId, votedAt });
+}
+export async function restoreVotes(): Promise<PollVote[]> {
+  const votes = await Promise.all(CITY_POLLS.map(poll => restoreVote(poll.id)));
+  return votes.filter((vote): vote is PollVote => vote !== null);
 }

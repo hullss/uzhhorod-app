@@ -61,13 +61,15 @@ export function CityEventsScreen({ dark, onBack }: { dark: boolean; onBack: () =
   const activeCategory = categories.includes(category) ? category : "Усі";
   useEffect(() => { if (category !== activeCategory) setCategory(activeCategory); }, [category, activeCategory]);
   const visible = selectEvents(catalog.items, tab === 1, activeCategory, now);
+  const upcomingCount = selectEvents(catalog.items, false, "Усі", now).length;
+  const archiveCount = selectEvents(catalog.items, true, "Усі", now).length;
   const archived = selected ? isArchived(selected, now) : false;
   const content = <SafeAreaView style={s.screen} {...swipe}>
     <StatusBar style={dark ? "light" : "dark"} />
     <View style={{ flex: 1 }} accessibilityElementsHidden={info} importantForAccessibility={info ? "no-hide-descendants" : "auto"} aria-hidden={info}>
       <ServiceHeader dark={dark} title={selected ? "Подія" : "Події міста"} onBack={back} onInfo={() => setInfo(true)} />
       {!selected && <View style={{ flex: 1 }}>
-        <ServiceTabs dark={dark} labels={["Майбутні", "Архів"]} selected={tab} onChange={index => { setTab(index); list.current?.scrollTo({ y: 0, animated: false }); }} />
+        <ServiceTabs dark={dark} labels={[`Майбутні · ${upcomingCount}`, `Архів · ${archiveCount}`]} selected={tab} onChange={index => { setTab(index); setCategory("Усі"); list.current?.scrollTo({ y: 0, animated: false }); }} />
         <ScrollView ref={list} contentContainerStyle={[s.content, { paddingTop: 0, gap: 16 }]} refreshControl={<RefreshControl refreshing={busy} onRefresh={() => void refresh()} tintColor={c.accent} />}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} style={{ flexGrow: 0 }}>
             {categories.map(label => <Pressable key={label} accessibilityRole="button" accessibilityState={{ selected: label === activeCategory }} onPress={() => setCategory(label)} style={{ minHeight: 44, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 22, backgroundColor: activeCategory === label ? c.button : c.surface, borderWidth: 1, borderColor: c.border }}>

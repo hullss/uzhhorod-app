@@ -26,7 +26,10 @@
     "check:parking": "node scripts/parking-check.mjs",
     "check:navigation": "node scripts/navigation-check.mjs",
     "check:demo-readiness": "node scripts/demo-readiness-check.mjs",
-    "release:check": "npm run typecheck && npm run check:contrast && npm run check:payments && npm run check:stability && npm run check:layout && npm run check:civic && npm run check:events && npm run check:news && npm run check:profile && npm run check:profile-overview && npm run check:safety && npm run check:power && npm run check:polish && npm run check:navigation && npm run check:audit && npm run check:parking && npm run check:demo-readiness"
+    "check:home-services": "node scripts/home-services-check.mjs",
+    "check:audit-followup": "node scripts/audit-followup-check.mjs",
+    "check:miniatures": "node scripts/miniatures-check.mjs",
+    "release:check": "npm run typecheck && npm run check:contrast && npm run check:payments && npm run check:stability && npm run check:layout && npm run check:civic && npm run check:events && npm run check:news && npm run check:profile && npm run check:profile-overview && npm run check:safety && npm run check:power && npm run check:polish && npm run check:navigation && npm run check:audit && npm run check:parking && npm run check:demo-readiness && npm run check:home-services && npm run check:audit-followup && npm run check:miniatures"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",

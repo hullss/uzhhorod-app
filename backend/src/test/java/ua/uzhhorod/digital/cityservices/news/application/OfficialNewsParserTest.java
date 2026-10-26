@@ -107,6 +107,33 @@ class OfficialNewsParserTest {
     }
 
     @Test
+    void excludesPhotoGalleryLinksButKeepsDocumentsAndUsefulExternalLinks() {
+        String gallery = java.util.stream.IntStream.range(0, 34)
+                .mapToObj(index -> "<a href='/media/photo-" + index + ".JPG?version=2'><img src='/media/thumb.jpg'></a>")
+                .collect(java.util.stream.Collectors.joining());
+        var article = OfficialNewsParser.parseArticle("""
+                <article><h1>Міська новина</h1><img src='/media/cover.jpg'>
+                <div class='post-item-inner-content'><p>Повний текст новини.</p>%s
+                <a href='/media/photo.webp#large'>Фото</a>
+                <a href='/media/photo?id=35'><img src='/media/thumb.jpg'></a>
+                <a href='#carousel-post-18534'><span>Переглянути фото</span></a>
+                <a href='/media/decision.pdf?download=1'>Рішення міської ради</a>
+                <a href='https://example.org/registration'>Зареєструватися на подію</a>
+                <a href='/media/decision.pdf?download=1'>Повтор документа</a>
+                <a href='/media/table.xlsx'><img src='/media/download-icon.png'></a>
+                </div></article>
+                """.formatted(gallery), "https://rada-uzhgorod.gov.ua/post/news", null);
+
+        assertThat(article.fullTextAvailable()).isTrue();
+        assertThat(article.blocks().getFirst().text()).isEqualTo("Повний текст новини.");
+        assertThat(article.imageUrl()).isEqualTo("https://rada-uzhgorod.gov.ua/media/cover.jpg");
+        assertThat(article.links()).containsExactly(
+                new OfficialNewsArticleResponse.Link("Рішення міської ради", "https://rada-uzhgorod.gov.ua/media/decision.pdf?download=1"),
+                new OfficialNewsArticleResponse.Link("Зареєструватися на подію", "https://example.org/registration"),
+                new OfficialNewsArticleResponse.Link("Відкрити посилання", "https://rada-uzhgorod.gov.ua/media/table.xlsx"));
+    }
+
+    @Test
     void doesNotPretendMenusOrBrokenContainersAreAFullArticle() {
         for (String html : List.of("<p>Меню</p><footer><p>Контакти</p></footer>",
                 "<article><h1>Заголовок</h1><div class='post-item-inner-content'><p>Неповна сторінка</p></article>")) {

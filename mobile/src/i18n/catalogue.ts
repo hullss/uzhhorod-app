@@ -1,5 +1,31 @@
 // Interface copy only. Editorial articles, event descriptions and addresses are not machine-translated.
 const entries = `
+Готово|Done
+Скасувати цей тестовий запис?|Cancel this test appointment?
+Запис буде перенесено до архіву на цьому пристрої.|The appointment will move to the archive on this device.
+Залишити запис|Keep appointment
+Так, скасувати запис|Yes, cancel appointment
+Показ розкладу|Schedule view
+Найближчі|Upcoming
+Увесь день|Full day
+Плановий час, не прогноз прибуття.|Scheduled times, not predicted arrivals.
+На сьогодні планові відправлення завершилися.|Today's scheduled departures have ended.
+Розклад на завтра|Tomorrow's schedule
+Показати весь день|Show full day
+Сервіси на головній|Home services
+Мої сервіси|My services
+Налаштувати|Customize
+Налаштувати сервіси на головній|Customize home services
+Оберіть до 6 сервісів для швидкого доступу. Вони з’являться на головній у порядку вибору.|Choose up to 6 shortcuts. They appear on your home screen in the order you select them.
+Вибір зберігається лише на цьому пристрої.|Your selection is saved only on this device.
+Обрано:|Selected:
+Повторити|Retry
+Вибрано максимум 6. Приберіть один сервіс, щоб додати інший.|You have selected the maximum of 6. Remove one to add another.
+Не вдалося прочитати вибір сервісів.|Could not load your service selection.
+Завантажуємо ваш вибір…|Loading your selection…
+Не вдалося зберегти вибір. Спробуйте ще раз.|Could not save your selection. Please try again.
+Повернути стандартні|Restore defaults
+Оберіть сервіси через кнопку «Налаштувати».|Choose your services using Customize.
 Картку не збережено. Спробуйте ще раз.|Card was not saved. Please try again.
 Картку не видалено. Спробуйте ще раз.|Card was not removed. Please try again.
 Новина|News article
@@ -939,6 +965,10 @@ GPS-позиції показуємо, коли вони доступні. Ча�
 Завантажуємо обране|Loading favourites
 Частина обраного поки недоступна. Збережені записи не видалено.|Some favourites are currently unavailable. Your saved entries have not been deleted.
 Тестовий сценарій|Test scenario
+Адреси|Addresses
+Квитки|Tickets
+Записи до ЦНАП|Administrative appointments
+Збережене|Saved
 GPS-позиції з DozoR|GPS positions from DozoR
 Показуємо координати, отримані від DozoR. Час отримання відповіді не є часом GPS-виміру; затримка джерела невідома. Час на зупинках — за розкладом.|We show coordinates received from DozoR. Response time is not the GPS measurement time; the source delay is unknown. Stop times come from the timetable.
 Сервіс повернув суперечливі адреси.|The service returned conflicting addresses.
@@ -962,6 +992,60 @@ GPS-позиції з DozoR|GPS positions from DozoR
 Поточний запис оператора|Current provider record
 Час потребує уточнення|Time needs clarification
 Джерело вказує час оновлення в майбутньому. Актуальність даних не підтверджено.|The source reports a future update time. Data freshness is unconfirmed.
+Транспорт і паркування|Transport and parking
+Дім і комунальні послуги|Home and utilities
+Документи та ЦНАП|Documents and administrative services
+Безпека й доступність|Safety and accessibility
+Події та дозвілля|Events and leisure
+Участь і допомога|Community and support
+Мій Ужгород|My Uzhhorod
+Тестовий запис · до ЦНАП не передається|Test appointment · not sent to the administrative centre
+Ваші щоденні справи — поруч|Your everyday essentials, close at hand
+Найближчий запис до ЦНАП|Next administrative appointment
+Додайте дім або роботу|Add home or work
+Картка для тестових оплат|Card for test payments
+Майбутні · {{0}}|Upcoming · {{0}}
+Архів · {{0}}|Archive · {{0}}
+{{0}} на мапі · {{1}} адрес у списку|{{0}} on the map · {{1}} addresses listed
+АВЕ публікує координати лише для частини адрес. Для інших доступний пошук адреси на зовнішній мапі.|AVE publishes coordinates for only some addresses. You can search the others on an external map.
+Є позначка на мапі|Marked on the map
+Координати ще не уточнені|Coordinates not yet confirmed
+Офіційна мапа АВЕ ↗|Official AVE map ↗
+Що зробить поїздки містом зручнішими?|What would make city travel easier?
+Оберіть одну зміну, яку ви хотіли б бачити у громадському транспорті. Це тестове опитування; відповідь не надсилається місту.|Choose one change you would like in public transport. This is a test poll; your response is not sent to the city.
+Більше вечірніх рейсів|More evening services
+Точніший час прибуття на зупинках|More accurate stop arrival times
+Доступні автобуси й зупинки|Accessible buses and stops
+Зручна безготівкова оплата|Convenient cashless payments
+Чого бракує у вашому районі?|What is missing in your neighbourhood?
+Яке покращення громадського простору було б найкориснішим? Це тестове опитування, а не затверджений план міських робіт.|Which public space improvement would help most? This is a test poll, not an approved city works plan.
+Освітлення пішохідних доріжок|Lighting for footpaths
+Дерева та затінок|Trees and shade
+Лавки й місця для відпочинку|Benches and places to rest
+Контейнери для сортування|Recycling bins
+Який цифровий сервіс додати наступним?|Which digital service should come next?
+Допоможіть обрати напрям розвитку прототипу. Ваш вибір збережеться лише на цьому пристрої.|Help choose the prototype's next direction. Your choice is saved only on this device.
+Сповіщення про відключення за адресою|Outage notifications for your address
+Звернення про міські проблеми|Report city issues
+Персональна добірка подій|Personal event recommendations
+Прогулянкові маршрути містом|City walking routes
+Тестові опитування: вибір зберігається лише на цьому пристрої, не в акаунті й не надсилається місту. Загальні відсотки й кількість учасників не показуємо без серверних даних.|Test polls: choices are saved only on this device, not in your account or sent to the city. Overall percentages and participant counts require server data.
+Взяти участь: {{0}}|Take part: {{0}}
+Переглянути мій голос: {{0}}|View my vote: {{0}}
+Не вдалося прочитати каталог мініскульптур. Спробуйте оновити його.|Could not read the miniature sculpture catalogue. Try refreshing it.
+Назва, адреса або скульптор|Name, address or sculptor
+Пошук мініскульптур|Search miniature sculptures
+Мапа мініскульптур|Miniature sculpture map
+Мапа недоступна. Локації є у списку нижче.|The map is unavailable. Locations are listed below.
+Очистити пошук|Clear search
+Локацій: {{0}}|Locations: {{0}}
+{{0}} із {{1}}|{{0}} of {{1}}
+Мініскульптур не знайдено. Спробуйте іншу назву або адресу.|No miniature sculptures found. Try another name or address.
+Координати взято з туристичної мапи. Актуальне місце й доступність перевіряйте за джерелами.|Coordinates come from a tourist map. Check sources for current locations and access.
+Туристична мапа MUSE Travel|MUSE Travel tourist map
+Координати з мапи MUSE Travel; на місці їх не перевіряли. Перед прогулянкою уточніть доступ до локації.|Coordinates are from the MUSE Travel map and have not been checked on site. Check access before visiting.
+Джерело інформації: {{0}}|Information source: {{0}}
+Власні короткі описи на основі відкритих фактичних відомостей. Координати — з туристичної мапи MUSE Travel; на місці їх не перевіряли. Скульптури можуть переносити, а доступ до дворів і музеїв може бути обмежений.|Original short descriptions based on publicly available facts. Coordinates are from the MUSE Travel tourist map and have not been checked on site. Sculptures may be moved, and access to courtyards and museums may be restricted.
 `;
 export const EN: Record<string, string> = Object.fromEntries(entries.trim().split("\n").map(line => {
   const [uk, en] = line.split("|");

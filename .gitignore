@@ -13,3 +13,5 @@ tmp/presentation-build/
 mobile/dist/
 mobile/public/vendor/maplibre-gl-worker.mjs
 backend/.maven-wrapper-cache/
+/output/
+/tmp/

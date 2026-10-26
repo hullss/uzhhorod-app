@@ -22,25 +22,42 @@ final class AccessibleBuildingParser {
                 identifier(record, name),
                 name.isBlank() ? "Будівля без назви" : name,
                 address(record),
-                parseDate(value(record, "date")));
+                monitoringDate(record));
     }
 
     private static String identifier(JsonNode record, String name) {
-        String id = value(record, "buildingId");
+        String id = value(record, "uid");
+        if (id.isBlank()) id = value(record, "buildingId");
         if (!id.isBlank()) return id;
         String rowId = value(record, "_id");
         if (!rowId.isBlank()) return "ckan-" + rowId;
-        String identity = name + "\n" + address(record) + "\n" + value(record, "date");
+        String identity = name + "\n" + address(record) + "\n" + monitoringDate(record);
         return "building-" + java.util.UUID.nameUUIDFromBytes(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private static String address(JsonNode record) {
         List<String> parts = new ArrayList<>();
+        // The current CKAN schema uses locatorDesignator for the house number,
+        // while the older resource used it for the street type.
+        if (record.has("uid") || record.has("monitoringDate")) {
+            addIfPresent(parts, value(record, "addressLocatorDesignator"));
+            addIfPresent(parts, value(record, "addressLocatorBuilding"));
+            addIfPresent(parts, value(record, "addressLocatorDesignatorBuilding"));
+            String street = value(record, "addressThoroughfare");
+            String building = String.join(" ", parts);
+            if (street.isBlank()) return building.isBlank() ? "Адреса не вказана" : building;
+            return building.isBlank() ? street : street + ", " + building;
+        }
         addIfPresent(parts, value(record, "addressLocatorDesignator"));
         addIfPresent(parts, value(record, "addressThoroughfare"));
         addIfPresent(parts, value(record, "addressLocatorBuilding"));
         addIfPresent(parts, value(record, "addressLocatorDesignatorBuilding"));
         return parts.isEmpty() ? "Адреса не вказана" : String.join(" ", parts);
+    }
+
+    private static LocalDate monitoringDate(JsonNode record) {
+        LocalDate current = parseDate(value(record, "monitoringDate"));
+        return current != null ? current : parseDate(value(record, "date"));
     }
 
     private static LocalDate parseDate(String value) {
@@ -62,6 +79,7 @@ final class AccessibleBuildingParser {
 
     private static String value(JsonNode record, String field) {
         JsonNode value = record.path(field);
-        return value.isMissingNode() || value.isNull() ? "" : value.asText().trim();
+        String text = value.isMissingNode() || value.isNull() ? "" : value.asText().trim();
+        return text.equalsIgnoreCase("null") ? "" : text;
     }
 }

@@ -94,6 +94,25 @@ try {
 } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, value: originalStorage }); }
 console.log("PASS: web localStorage persistence");
 
+// Every poll has an independent durable vote; the original v1 choice stays readable.
+for (const poll of civic.CITY_POLLS.slice(1)) {
+  const next = civic.createVote(poll.options[0].id, null, now, poll.id);
+  assert.ok(civic.isPollVote(next));
+  assert.throws(() => civic.createVote(poll.options[1].id, next, now, poll.id));
+  assert.equal(civic.isPollVote({ ...next, optionId: "parks" }), false);
+  await storage.persistVote(next);
+}
+storage = store();
+assert.equal((await storage.restoreVotes()).length, 4);
+assert.equal((await storage.restoreVote()).optionId, "parks", "existing v1 vote is preserved");
+for (const poll of civic.CITY_POLLS.slice(1)) assert.equal((await storage.restoreVote(poll.id)).optionId, poll.options[0].id);
+failWrite = true;
+await assert.rejects(storage.persistVote(civic.createVote("shade", null, now, "city-spaces-v1")));
+failWrite = false;
+assert.equal((await storage.restoreVote("city-spaces-v1")).optionId, "lighting");
+assert.equal((await storage.restoreVote("transport-comfort-v1")).optionId, "evening");
+console.log("PASS: four independent polls preserve legacy votes across reopening, reject cross-poll answers/repeats, and retain each choice after a failed write");
+
 const ui = module("../src/components/CivicServiceUI.tsx", {
   "../i18n/ui": { Pressable: "Pressable", Text: "Text" },
   "@expo/vector-icons": {}, react: {}, "react/jsx-runtime": {},

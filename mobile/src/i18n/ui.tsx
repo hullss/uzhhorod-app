@@ -28,9 +28,13 @@ export const TextInput = forwardRef<NativeTextInput, TextInputProps>(function Lo
   useLanguage();
   return <NativeTextInput {...props} style={[{ fontFamily: APP_FONTS.regular }, props.style]} ref={ref} placeholder={placeholder && translate(placeholder)} accessibilityLabel={accessibilityLabel && translate(accessibilityLabel)} accessibilityHint={accessibilityHint && translate(accessibilityHint)} />;
 });
-export function Pressable({ accessibilityLabel, accessibilityHint, ...props }: PressableProps) {
+export function Pressable({ accessibilityLabel, accessibilityHint, accessibilityState, ...props }: PressableProps) {
   useLanguage();
-  return <NativePressable {...props} accessibilityLabel={accessibilityLabel && translate(accessibilityLabel)} accessibilityHint={accessibilityHint && translate(accessibilityHint)} />;
+  return <NativePressable {...props} accessibilityState={accessibilityState}
+    aria-checked={props["aria-checked"] ?? accessibilityState?.checked}
+    aria-selected={props["aria-selected"] ?? accessibilityState?.selected}
+    aria-disabled={props["aria-disabled"] ?? accessibilityState?.disabled ?? props.disabled ?? undefined}
+    accessibilityLabel={accessibilityLabel && translate(accessibilityLabel)} accessibilityHint={accessibilityHint && translate(accessibilityHint)} />;
 }
 export const Alert = {
   alert: (...args: Parameters<typeof NativeAlert.alert>) => {

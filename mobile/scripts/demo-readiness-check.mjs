@@ -8,6 +8,7 @@ const ast = ts.createSourceFile("App.tsx", source, ts.ScriptTarget.Latest, true,
 const names = new Set(["ServiceGridCard", "DashboardServiceCard"]);
 const declarations = ast.statements.filter(node => ts.isFunctionDeclaration(node) && names.has(node.name?.text));
 const jsx = (type, props) => ({ type, props });
+const resolve = tree => typeof tree?.type === "function" ? resolve(tree.type(tree.props)) : tree;
 const nodes = tree => !tree || typeof tree !== "object" ? [] : Array.isArray(tree) ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)];
 const code = ts.transpileModule(declarations.map(node => node.getText(ast)).join("\n"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -18,7 +19,7 @@ vm.createContext(context); vm.runInContext(code, context);
 for (const name of names) {
   let pressed = 0;
   const props = { icon: "car-outline", title: "Паркування", onPress: () => pressed++ };
-  const normal = context[name](props), test = context[name]({ ...props, testScenario: true });
+  const normal = resolve(context[name](props)), test = resolve(context[name]({ ...props, testScenario: true }));
   assert.equal(nodes(normal).filter(node => node.props?.children === "Тестовий сценарій").length, 0);
   assert.equal(nodes(test).filter(node => node.props?.children === "Тестовий сценарій").length, 1);
   test.props.onPress(); assert.equal(pressed, 1);

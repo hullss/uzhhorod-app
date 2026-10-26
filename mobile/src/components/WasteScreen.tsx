@@ -3,7 +3,7 @@ import { Linking, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Alert, Pressable, Text } from "../i18n/ui";
 import { ScreenSafeArea } from "../ui/Screen";
-import { ECO_ISLANDS, ECO_SOURCE, type EcoIsland } from "../maps/ecoIslands";
+import { ECO_ISLANDS, ECO_SOURCE, ECO_MAP_SOURCE, type EcoIsland } from "../maps/ecoIslands";
 import { OfficialLayerMap } from "./OfficialLayerMap";
 import { civicStyles, civicTheme, PrimaryButton, ServiceHeader, ServiceSheet, useHardwareBack, useServiceSwipeBack } from "./CivicServiceUI";
 
@@ -16,9 +16,11 @@ export function WasteScreen({ dark, onBack }: { dark: boolean; onBack: () => voi
     <ServiceHeader dark={dark} title="Сортування відходів" onBack={back} />
     <ScrollView contentContainerStyle={s.content}>
       <View style={{ height: 280, borderRadius: 12, overflow: "hidden", borderColor: c.border, borderWidth: 1 }}><OfficialLayerMap points={points} pinColor="#3d6836" onPointPress={p => setSelected(ECO_ISLANDS.find(e => e.id === p.id) ?? null)} /></View>
-      <Text style={s.muted}>На мапі — точки з координатами АВЕ. Решта опублікованих адрес — у списку нижче.</Text>
+      <Text style={s.muted}>{`${points.length} на мапі · ${ECO_ISLANDS.length} адрес у списку`}</Text>
+      <Text style={s.muted}>АВЕ публікує координати лише для частини адрес. Для інших доступний пошук адреси на зовнішній мапі.</Text>
       <Text style={s.title}>Екоострівці АВЕ</Text>
-      <View style={[s.card, { padding: 0 }]}>{ECO_ISLANDS.map((p, i) => <Pressable key={p.id} accessibilityRole="button" onPress={() => setSelected(p)} style={[s.row, i < ECO_ISLANDS.length - 1 && s.divider]}><Ionicons name="leaf-outline" size={22} color={c.accent} /><View style={{ flex: 1 }}><Text translate={false} style={s.body}>{p.address}</Text>{p.reuse && <Text style={s.muted}>Є реюз-центр</Text>}</View><Ionicons name="chevron-forward" size={18} color={c.muted} /></Pressable>)}</View>
+      <View style={[s.card, { padding: 0 }]}>{ECO_ISLANDS.map((p, i) => <Pressable key={p.id} accessibilityRole="button" onPress={() => setSelected(p)} style={[s.row, i < ECO_ISLANDS.length - 1 && s.divider]}><Ionicons name="leaf-outline" size={22} color={c.accent} /><View style={{ flex: 1 }}><Text translate={false} style={s.body}>{p.address}</Text><Text style={s.muted}>{p.latitude !== undefined ? "Є позначка на мапі" : "Координати ще не уточнені"}</Text>{p.reuse && <Text style={s.muted}>Є реюз-центр</Text>}</View><Ionicons name="chevron-forward" size={18} color={c.muted} /></Pressable>)}</View>
+      <Pressable accessibilityRole="link" style={s.iconButton} onPress={() => void open(ECO_MAP_SOURCE)}><Text style={s.link}>Офіційна мапа АВЕ ↗</Text></Pressable>
       <Pressable accessibilityRole="link" style={s.iconButton} onPress={() => void open(ECO_SOURCE)}><Text style={s.link}>Інформація АВЕ ↗</Text></Pressable>
     </ScrollView>
     <ServiceSheet dark={dark} visible={!!selected} onClose={() => setSelected(null)}>

@@ -1,0 +1,22 @@
+[
+  {
+    "_id": 1,
+    "uid": "03192997",
+    "monitoringDate": "2024-01-01T00:00:00.000",
+    "entityName": "Департамент соціальної політики",
+    "buildingName": "Департамент соціальної політики УМР",
+    "addressThoroughfare": "площа Шандора Петефі",
+    "addressLocatorDesignator": "24",
+    "addressLocatorBuilding": "null"
+  },
+  {
+    "_id": 2,
+    "uid": "13",
+    "monitoringDate": "2024-02-10T00:00:00.000",
+    "entityName": "КНП \"Центральна міська клінічна лікарня\" Ужгородської міської ради",
+    "buildingName": "Головний корпус",
+    "addressThoroughfare": "Олександра Грибоєдова",
+    "addressLocatorDesignator": "20",
+    "addressLocatorBuilding": "null"
+  }
+]

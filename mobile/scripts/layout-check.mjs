@@ -84,11 +84,12 @@ console.log("PASS: навігація не виходить за екран, у 
 for (const [grid, card] of [["serviceGrid", "serviceGridCard"], ["dashboardServicesGrid", "dashboardServiceCard"]]) {
   for (const width of [320, 360, 390, 430]) {
     const content = width - PAGE_LAYOUT.gutter * 2;
-    const occupied = content * (parseFloat(styles[card].width) * 2 + parseFloat(styles[grid].columnGap)) / 100;
-    assert.ok(Math.abs(occupied - content) < 0.01, `${grid}: дві картки та проміжок мають вміщатися при ${width}px`);
+    const columns = styles[grid].flexDirection === "column" ? 1 : 2;
+    const occupied = content * (parseFloat(styles[card].width) * columns + parseFloat(styles[grid].columnGap ?? "0") * (columns - 1)) / 100;
+    assert.ok(Math.abs(occupied - content) < 0.01, `${grid}: картки та проміжки мають вміщатися при ${width}px`);
   }
 }
-console.log("PASS: двоколонкові сітки розраховані для ширин 320/360/390/430 px");
+console.log("PASS: картки сервісів розраховані для ширин 320/360/390/430 px");
 
 // Fixed headers must own an explicit gutter; SafeAreaView padding is unreliable on iOS.
 function visit(node) {
